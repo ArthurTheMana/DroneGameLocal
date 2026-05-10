@@ -10,7 +10,8 @@ public sealed class Game1 : Game
 {
     private const int ScreenWidth = 900;
     private const int ScreenHeight = 600;
-    private const int WinScore = 20;
+    private const int WinScore = 200;
+    private const int MaxObstacles = 8;
 
     private readonly GraphicsDeviceManager _graphics;
 
@@ -22,8 +23,15 @@ public sealed class Game1 : Game
     private readonly GameState _gameState = new();
     private readonly Random _random = new();
 
+    private KeyboardState _previousKeyboard;
+
     private float _spawnTimer;
     private float _spawnInterval = 1.15f;
+    private float _difficultyTimer;
+    private float _collisionCooldown;
+
+    private int _highScore;
+    private bool _isPaused;
 
     public Game1()
     {
@@ -39,6 +47,8 @@ public sealed class Game1 : Game
         _graphics.PreferredBackBufferHeight = ScreenHeight;
         _graphics.ApplyChanges();
 
+        _highScore = LocalSaveManager.LoadHighScore();
+
         base.Initialize();
     }
 
@@ -52,22 +62,21 @@ public sealed class Game1 : Game
 
     protected override void Update(GameTime gameTime)
     {
-        var keyboard = Keyboard.GetState();
+        KeyboardState keyboard = Keyboard.GetState();
 
-        if (keyboard.IsKeyDown(Keys.Escape))
+        if (IsKeyPressed(keyboard, Keys.Escape))
         {
             Exit();
         }
 
         if (_gameState.Current == GameStateType.Start)
         {
-            Window.Title = "Press Enter to Start";
-
-            if (keyboard.IsKeyDown(Keys.Enter))
+            if (IsKeyPressed(keyboard, Keys.Enter) || IsKeyPressed(keyboard, Keys.Space))
             {
                 StartNewGame();
             }
 
+            _previousKeyboard = keyboard;
             base.Update(gameTime);
             return;
         }
@@ -75,18 +84,38 @@ public sealed class Game1 : Game
         if (_gameState.Current == GameStateType.Fail ||
             _gameState.Current == GameStateType.Win)
         {
-            Window.Title = $"{_gameState.Current} | Score: {_gameState.Score} | Press Enter to Restart";
-
-            if (keyboard.IsKeyDown(Keys.Enter))
+            if (IsKeyPressed(keyboard, Keys.Enter) || IsKeyPressed(keyboard, Keys.Space))
             {
                 StartNewGame();
             }
 
+            _previousKeyboard = keyboard;
+            base.Update(gameTime);
+            return;
+        }
+
+        if (IsKeyPressed(keyboard, Keys.P))
+        {
+            _isPaused = !_isPaused;
+        }
+
+        if (_isPaused)
+        {
+            _previousKeyboard = keyboard;
             base.Update(gameTime);
             return;
         }
 
         float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
+        if (_collisionCooldown > 0f)
+        {
+            _collisionCooldown -= deltaTime;
+
+            _previousKeyboard = keyboard;
+            base.Update(gameTime);
+            return;
+        }
 
         HandleInput(keyboard, deltaTime);
         SpawnObstacles(deltaTime);
@@ -94,23 +123,35 @@ public sealed class Game1 : Game
         CheckCollision();
         CheckWin();
 
-        Window.Title = $"Score: {_gameState.Score}/{WinScore} | Lives: {_gameState.Lives}";
+        Window.Title = $"Score: {_gameState.Score}/{WinScore} | Lives: {_gameState.Lives} | Best: {_highScore}";
 
+        _previousKeyboard = keyboard;
         base.Update(gameTime);
+    }
+
+    private bool IsKeyPressed(KeyboardState keyboard, Keys key)
+    {
+        return keyboard.IsKeyDown(key) && !_previousKeyboard.IsKeyDown(key);
     }
 
     private void StartNewGame()
     {
         _gameState.StartGame();
+
         _drone.Reset(100, 280);
         _obstacles.Clear();
+
         _spawnTimer = 0f;
         _spawnInterval = 1.15f;
+        _difficultyTimer = 0f;
+        _collisionCooldown = 0f;
+
+        _isPaused = false;
     }
 
     private void HandleInput(KeyboardState keyboard, float deltaTime)
     {
-        var direction = Vector2.Zero;
+        Vector2 direction = Vector2.Zero;
 
         if (keyboard.IsKeyDown(Keys.Up) || keyboard.IsKeyDown(Keys.W))
         {
@@ -139,8 +180,20 @@ public sealed class Game1 : Game
     private void SpawnObstacles(float deltaTime)
     {
         _spawnTimer += deltaTime;
+        _difficultyTimer += deltaTime;
+
+        if (_difficultyTimer >= 10f)
+        {
+            _difficultyTimer = 0f;
+            _spawnInterval = Math.Max(0.65f, _spawnInterval - 0.08f);
+        }
 
         if (_spawnTimer < _spawnInterval)
+        {
+            return;
+        }
+
+        if (_obstacles.Count >= MaxObstacles)
         {
             return;
         }
@@ -149,8 +202,9 @@ public sealed class Game1 : Game
 
         int width = _random.Next(35, 80);
         int height = _random.Next(45, 140);
-        int y = _random.Next(40, ScreenHeight - height - 40);
-        float speed = _random.Next(180, 280);
+        int y = _random.Next(60, ScreenHeight - height - 40);
+
+        float speed = _random.Next(180, 280) + (_gameState.Score * 0.35f);
 
         var obstacle = new Obstacle(
             ScreenWidth,
@@ -167,14 +221,15 @@ public sealed class Game1 : Game
     {
         for (int i = _obstacles.Count - 1; i >= 0; i--)
         {
-            var obstacle = _obstacles[i];
+            Obstacle obstacle = _obstacles[i];
+
             obstacle.Update(deltaTime);
 
             if (!obstacle.ScoreCounted &&
                 obstacle.Position.X + obstacle.Width < _drone.Position.X)
             {
                 obstacle.ScoreCounted = true;
-                _gameState.Score += 1;
+                _gameState.Score += 10;
             }
 
             if (obstacle.IsOffScreen())
@@ -196,10 +251,12 @@ public sealed class Game1 : Game
         _gameState.Lives -= 1;
         _obstacles.Clear();
         _drone.Reset(100, 280);
+        _collisionCooldown = 1.0f;
 
         if (_gameState.Lives <= 0)
         {
             _gameState.Current = GameStateType.Fail;
+            SaveHighScoreIfNeeded();
         }
     }
 
@@ -208,7 +265,19 @@ public sealed class Game1 : Game
         if (_gameState.Score >= WinScore)
         {
             _gameState.Current = GameStateType.Win;
+            SaveHighScoreIfNeeded();
         }
+    }
+
+    private void SaveHighScoreIfNeeded()
+    {
+        if (_gameState.Score <= _highScore)
+        {
+            return;
+        }
+
+        _highScore = _gameState.Score;
+        LocalSaveManager.SaveHighScore(_highScore);
     }
 
     protected override void Draw(GameTime gameTime)
@@ -225,20 +294,55 @@ public sealed class Game1 : Game
         DrawBackground();
         DrawDrone();
         DrawObstacles();
+        DrawHud();
+
+        if (_collisionCooldown > 0f && _gameState.Current == GameStateType.Playing)
+        {
+            PixelText.DrawCenteredText(
+                _spriteBatch,
+                _pixel,
+                "CRASH",
+                ScreenWidth,
+                255,
+                5,
+                new Color(255, 214, 10)
+            );
+        }
+
+        if (_isPaused)
+        {
+            DrawPanel(new Color(20, 20, 20, 210));
+
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PAUSED", ScreenWidth, 230, 5, Color.White);
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS P TO RESUME", ScreenWidth, 290, 3, new Color(0, 217, 255));
+        }
 
         if (_gameState.Current == GameStateType.Start)
         {
-            DrawPanel(new Color(30, 70, 120, 180));
+            DrawPanel(new Color(30, 70, 120, 210));
+
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "DRONE GAME", ScreenWidth, 190, 5, Color.White);
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS ENTER TO START", ScreenWidth, 270, 3, new Color(0, 217, 255));
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "WASD OR ARROWS TO MOVE", ScreenWidth, 315, 2, new Color(255, 214, 10));
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "P TO PAUSE / ESC TO QUIT", ScreenWidth, 345, 2, new Color(255, 255, 255));
         }
 
         if (_gameState.Current == GameStateType.Fail)
         {
-            DrawPanel(new Color(120, 30, 30, 180));
+            DrawPanel(new Color(120, 30, 30, 220));
+
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "GAME OVER", ScreenWidth, 205, 5, Color.White);
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, $"SCORE { _gameState.Score }", ScreenWidth, 275, 3, new Color(255, 214, 10));
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS ENTER TO RESTART", ScreenWidth, 325, 3, new Color(0, 217, 255));
         }
 
         if (_gameState.Current == GameStateType.Win)
         {
-            DrawPanel(new Color(30, 120, 70, 180));
+            DrawPanel(new Color(30, 120, 70, 220));
+
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "YOU WIN", ScreenWidth, 205, 5, Color.White);
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, $"SCORE { _gameState.Score }", ScreenWidth, 275, 3, new Color(255, 214, 10));
+            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS ENTER TO RESTART", ScreenWidth, 325, 3, new Color(0, 217, 255));
         }
 
         _spriteBatch.End();
@@ -259,6 +363,38 @@ public sealed class Game1 : Game
         }
     }
 
+    private void DrawHud()
+    {
+        DrawRect(new Rectangle(0, 0, ScreenWidth, 52), new Color(0, 0, 0, 120));
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"SCORE {_gameState.Score}",
+            new Vector2(20, 18),
+            3,
+            Color.White
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"LIVES {_gameState.Lives}",
+            new Vector2(300, 18),
+            3,
+            new Color(0, 217, 255)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"BEST {_highScore}",
+            new Vector2(570, 18),
+            3,
+            new Color(255, 214, 10)
+        );
+    }
+
     private void DrawDrone()
     {
         DrawRect(_drone.GetBounds(), new Color(0, 217, 255));
@@ -275,7 +411,7 @@ public sealed class Game1 : Game
 
     private void DrawObstacles()
     {
-        foreach (var obstacle in _obstacles)
+        foreach (Obstacle obstacle in _obstacles)
         {
             DrawRect(obstacle.GetBounds(), new Color(255, 80, 100));
         }
@@ -284,10 +420,10 @@ public sealed class Game1 : Game
     private void DrawPanel(Color color)
     {
         var panel = new Rectangle(
-            ScreenWidth / 2 - 170,
-            ScreenHeight / 2 - 60,
-            340,
-            120
+            ScreenWidth / 2 - 300,
+            ScreenHeight / 2 - 140,
+            600,
+            280
         );
 
         DrawRect(panel, color);
