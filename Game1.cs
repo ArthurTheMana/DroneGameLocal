@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -8,30 +7,24 @@ namespace DroneGameLocal;
 
 public sealed class Game1 : Game
 {
-    private const int ScreenWidth = 900;
-    private const int ScreenHeight = 600;
-    private const int WinScore = 200;
-    private const int MaxObstacles = 8;
-
     private readonly GraphicsDeviceManager _graphics;
 
     private SpriteBatch? _spriteBatch;
     private Texture2D? _pixel;
 
-    private readonly Drone _drone = new(100, 280);
+    private readonly Drone _drone = new(
+        GameSettings.StartDroneX,
+        GameSettings.StartDroneY
+    );
+
     private readonly List<Obstacle> _obstacles = new();
+
     private readonly GameState _gameState = new();
-    private readonly Random _random = new();
+    private readonly InputManager _inputManager = new();
+    private readonly ScoreManager _scoreManager = new();
+    private readonly ObstacleSpawner _obstacleSpawner = new();
 
-    private KeyboardState _previousKeyboard;
-
-    private float _spawnTimer;
-    private float _spawnInterval = 1.15f;
-    private float _difficultyTimer;
     private float _collisionCooldown;
-
-    private int _highScore;
-    private bool _isPaused;
 
     public Game1()
     {
@@ -43,11 +36,9 @@ public sealed class Game1 : Game
 
     protected override void Initialize()
     {
-        _graphics.PreferredBackBufferWidth = ScreenWidth;
-        _graphics.PreferredBackBufferHeight = ScreenHeight;
+        _graphics.PreferredBackBufferWidth = GameSettings.ScreenWidth;
+        _graphics.PreferredBackBufferHeight = GameSettings.ScreenHeight;
         _graphics.ApplyChanges();
-
-        _highScore = LocalSaveManager.LoadHighScore();
 
         base.Initialize();
     }
@@ -62,159 +53,126 @@ public sealed class Game1 : Game
 
     protected override void Update(GameTime gameTime)
     {
-        KeyboardState keyboard = Keyboard.GetState();
+        _inputManager.Update();
 
-        if (IsKeyPressed(keyboard, Keys.Escape))
+        if (_inputManager.IsKeyPressed(Keys.Escape))
         {
             Exit();
         }
 
         if (_gameState.Current == GameStateType.Start)
         {
-            if (IsKeyPressed(keyboard, Keys.Enter) || IsKeyPressed(keyboard, Keys.Space))
-            {
-                StartNewGame();
-            }
+            UpdateStartState(gameTime);
+            return;
+        }
 
-            _previousKeyboard = keyboard;
+        if (_gameState.IsGameOver())
+        {
+            UpdateGameOverState(gameTime);
+            return;
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.P))
+        {
+            TogglePause();
+        }
+
+        if (_gameState.Current == GameStateType.Paused)
+        {
             base.Update(gameTime);
             return;
         }
 
-        if (_gameState.Current == GameStateType.Fail ||
-            _gameState.Current == GameStateType.Win)
-        {
-            if (IsKeyPressed(keyboard, Keys.Enter) || IsKeyPressed(keyboard, Keys.Space))
-            {
-                StartNewGame();
-            }
+        UpdatePlayingState(gameTime);
 
-            _previousKeyboard = keyboard;
-            base.Update(gameTime);
-            return;
+        base.Update(gameTime);
+    }
+
+    private void UpdateStartState(GameTime gameTime)
+    {
+        if (_inputManager.IsKeyPressed(Keys.Enter) ||
+            _inputManager.IsKeyPressed(Keys.Space))
+        {
+            StartNewGame();
         }
 
-        if (IsKeyPressed(keyboard, Keys.P))
+        base.Update(gameTime);
+    }
+
+    private void UpdateGameOverState(GameTime gameTime)
+    {
+        if (_inputManager.IsKeyPressed(Keys.Enter) ||
+            _inputManager.IsKeyPressed(Keys.Space))
         {
-            _isPaused = !_isPaused;
+            StartNewGame();
         }
 
-        if (_isPaused)
-        {
-            _previousKeyboard = keyboard;
-            base.Update(gameTime);
-            return;
-        }
+        base.Update(gameTime);
+    }
 
+    private void UpdatePlayingState(GameTime gameTime)
+    {
         float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
         if (_collisionCooldown > 0f)
         {
             _collisionCooldown -= deltaTime;
-
-            _previousKeyboard = keyboard;
             base.Update(gameTime);
             return;
         }
 
-        HandleInput(keyboard, deltaTime);
-        SpawnObstacles(deltaTime);
+        HandleDroneMovement(deltaTime);
+        _obstacleSpawner.Update(deltaTime, _obstacles, _scoreManager.Score);
         UpdateObstacles(deltaTime);
         CheckCollision();
         CheckWin();
 
-        Window.Title = $"Score: {_gameState.Score}/{WinScore} | Lives: {_gameState.Lives} | Best: {_highScore}";
-
-        _previousKeyboard = keyboard;
-        base.Update(gameTime);
-    }
-
-    private bool IsKeyPressed(KeyboardState keyboard, Keys key)
-    {
-        return keyboard.IsKeyDown(key) && !_previousKeyboard.IsKeyDown(key);
+        Window.Title =
+            $"Score: {_scoreManager.Score}/{GameSettings.WinScore} | " +
+            $"Lives: {_gameState.Lives} | " +
+            $"Best: {_scoreManager.HighScore}";
     }
 
     private void StartNewGame()
     {
         _gameState.StartGame();
+        _scoreManager.ResetScore();
 
-        _drone.Reset(100, 280);
-        _obstacles.Clear();
-
-        _spawnTimer = 0f;
-        _spawnInterval = 1.15f;
-        _difficultyTimer = 0f;
-        _collisionCooldown = 0f;
-
-        _isPaused = false;
-    }
-
-    private void HandleInput(KeyboardState keyboard, float deltaTime)
-    {
-        Vector2 direction = Vector2.Zero;
-
-        if (keyboard.IsKeyDown(Keys.Up) || keyboard.IsKeyDown(Keys.W))
-        {
-            direction.Y -= 1;
-        }
-
-        if (keyboard.IsKeyDown(Keys.Down) || keyboard.IsKeyDown(Keys.S))
-        {
-            direction.Y += 1;
-        }
-
-        if (keyboard.IsKeyDown(Keys.Left) || keyboard.IsKeyDown(Keys.A))
-        {
-            direction.X -= 1;
-        }
-
-        if (keyboard.IsKeyDown(Keys.Right) || keyboard.IsKeyDown(Keys.D))
-        {
-            direction.X += 1;
-        }
-
-        _drone.Move(direction, deltaTime);
-        _drone.ClampToScreen(ScreenWidth, ScreenHeight);
-    }
-
-    private void SpawnObstacles(float deltaTime)
-    {
-        _spawnTimer += deltaTime;
-        _difficultyTimer += deltaTime;
-
-        if (_difficultyTimer >= 10f)
-        {
-            _difficultyTimer = 0f;
-            _spawnInterval = Math.Max(0.65f, _spawnInterval - 0.08f);
-        }
-
-        if (_spawnTimer < _spawnInterval)
-        {
-            return;
-        }
-
-        if (_obstacles.Count >= MaxObstacles)
-        {
-            return;
-        }
-
-        _spawnTimer = 0f;
-
-        int width = _random.Next(35, 80);
-        int height = _random.Next(45, 140);
-        int y = _random.Next(60, ScreenHeight - height - 40);
-
-        float speed = _random.Next(180, 280) + (_gameState.Score * 0.35f);
-
-        var obstacle = new Obstacle(
-            ScreenWidth,
-            y,
-            width,
-            height,
-            speed
+        _drone.Reset(
+            GameSettings.StartDroneX,
+            GameSettings.StartDroneY
         );
 
-        _obstacles.Add(obstacle);
+        _obstacles.Clear();
+        _obstacleSpawner.Reset();
+
+        _collisionCooldown = 0f;
+    }
+
+    private void TogglePause()
+    {
+        if (_gameState.Current == GameStateType.Playing)
+        {
+            _gameState.Pause();
+            return;
+        }
+
+        if (_gameState.Current == GameStateType.Paused)
+        {
+            _gameState.Resume();
+        }
+    }
+
+    private void HandleDroneMovement(float deltaTime)
+    {
+        Vector2 direction = _inputManager.GetMovementDirection();
+
+        _drone.Move(direction, deltaTime);
+
+        _drone.ClampToScreen(
+            GameSettings.ScreenWidth,
+            GameSettings.ScreenHeight
+        );
     }
 
     private void UpdateObstacles(float deltaTime)
@@ -229,7 +187,7 @@ public sealed class Game1 : Game
                 obstacle.Position.X + obstacle.Width < _drone.Position.X)
             {
                 obstacle.ScoreCounted = true;
-                _gameState.Score += 10;
+                _scoreManager.AddScore(10);
             }
 
             if (obstacle.IsOffScreen())
@@ -248,36 +206,32 @@ public sealed class Game1 : Game
             return;
         }
 
-        _gameState.Lives -= 1;
-        _obstacles.Clear();
-        _drone.Reset(100, 280);
-        _collisionCooldown = 1.0f;
+        _gameState.LoseLife();
 
-        if (_gameState.Lives <= 0)
+        _obstacles.Clear();
+
+        _drone.Reset(
+            GameSettings.StartDroneX,
+            GameSettings.StartDroneY
+        );
+
+        _collisionCooldown = GameSettings.CollisionCooldownSeconds;
+
+        if (_gameState.Current == GameStateType.Fail)
         {
-            _gameState.Current = GameStateType.Fail;
-            SaveHighScoreIfNeeded();
+            _scoreManager.SaveHighScoreIfNeeded();
         }
     }
 
     private void CheckWin()
     {
-        if (_gameState.Score >= WinScore)
-        {
-            _gameState.Current = GameStateType.Win;
-            SaveHighScoreIfNeeded();
-        }
-    }
-
-    private void SaveHighScoreIfNeeded()
-    {
-        if (_gameState.Score <= _highScore)
+        if (!_scoreManager.HasReachedWinScore())
         {
             return;
         }
 
-        _highScore = _gameState.Score;
-        LocalSaveManager.SaveHighScore(_highScore);
+        _gameState.Win();
+        _scoreManager.SaveHighScoreIfNeeded();
     }
 
     protected override void Draw(GameTime gameTime)
@@ -295,82 +249,200 @@ public sealed class Game1 : Game
         DrawDrone();
         DrawObstacles();
         DrawHud();
-
-        if (_collisionCooldown > 0f && _gameState.Current == GameStateType.Playing)
-        {
-            PixelText.DrawCenteredText(
-                _spriteBatch,
-                _pixel,
-                "CRASH",
-                ScreenWidth,
-                255,
-                5,
-                new Color(255, 214, 10)
-            );
-        }
-
-        if (_isPaused)
-        {
-            DrawPanel(new Color(20, 20, 20, 210));
-
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PAUSED", ScreenWidth, 230, 5, Color.White);
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS P TO RESUME", ScreenWidth, 290, 3, new Color(0, 217, 255));
-        }
-
-        if (_gameState.Current == GameStateType.Start)
-        {
-            DrawPanel(new Color(30, 70, 120, 210));
-
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "DRONE GAME", ScreenWidth, 190, 5, Color.White);
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS ENTER TO START", ScreenWidth, 270, 3, new Color(0, 217, 255));
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "WASD OR ARROWS TO MOVE", ScreenWidth, 315, 2, new Color(255, 214, 10));
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "P TO PAUSE / ESC TO QUIT", ScreenWidth, 345, 2, new Color(255, 255, 255));
-        }
-
-        if (_gameState.Current == GameStateType.Fail)
-        {
-            DrawPanel(new Color(120, 30, 30, 220));
-
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "GAME OVER", ScreenWidth, 205, 5, Color.White);
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, $"SCORE { _gameState.Score }", ScreenWidth, 275, 3, new Color(255, 214, 10));
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS ENTER TO RESTART", ScreenWidth, 325, 3, new Color(0, 217, 255));
-        }
-
-        if (_gameState.Current == GameStateType.Win)
-        {
-            DrawPanel(new Color(30, 120, 70, 220));
-
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "YOU WIN", ScreenWidth, 205, 5, Color.White);
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, $"SCORE { _gameState.Score }", ScreenWidth, 275, 3, new Color(255, 214, 10));
-            PixelText.DrawCenteredText(_spriteBatch, _pixel, "PRESS ENTER TO RESTART", ScreenWidth, 325, 3, new Color(0, 217, 255));
-        }
+        DrawStateOverlay();
 
         _spriteBatch.End();
 
         base.Draw(gameTime);
     }
 
-    private void DrawBackground()
+    private void DrawStateOverlay()
     {
-        for (int y = 0; y < ScreenHeight; y += 60)
+        if (_collisionCooldown > 0f &&
+            _gameState.Current == GameStateType.Playing)
         {
-            DrawRect(new Rectangle(0, y, ScreenWidth, 2), new Color(255, 255, 255, 25));
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "CRASH",
+                GameSettings.ScreenWidth,
+                255,
+                5,
+                new Color(255, 214, 10)
+            );
         }
 
-        for (int x = 0; x < ScreenWidth; x += 90)
+        if (_gameState.Current == GameStateType.Paused)
         {
-            DrawRect(new Rectangle(x, 0, 2, ScreenHeight), new Color(255, 255, 255, 18));
+            DrawPanel(new Color(20, 20, 20, 210));
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PAUSED",
+                GameSettings.ScreenWidth,
+                230,
+                5,
+                Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PRESS P TO RESUME",
+                GameSettings.ScreenWidth,
+                290,
+                3,
+                new Color(0, 217, 255)
+            );
+        }
+
+        if (_gameState.Current == GameStateType.Start)
+        {
+            DrawPanel(new Color(30, 70, 120, 210));
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "DRONE GAME",
+                GameSettings.ScreenWidth,
+                190,
+                5,
+                Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PRESS ENTER TO START",
+                GameSettings.ScreenWidth,
+                270,
+                3,
+                new Color(0, 217, 255)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "WASD OR ARROWS TO MOVE",
+                GameSettings.ScreenWidth,
+                315,
+                2,
+                new Color(255, 214, 10)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "P TO PAUSE / ESC TO QUIT",
+                GameSettings.ScreenWidth,
+                345,
+                2,
+                Color.White
+            );
+        }
+
+        if (_gameState.Current == GameStateType.Fail)
+        {
+            DrawPanel(new Color(120, 30, 30, 220));
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "GAME OVER",
+                GameSettings.ScreenWidth,
+                205,
+                5,
+                Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                $"SCORE {_scoreManager.Score}",
+                GameSettings.ScreenWidth,
+                275,
+                3,
+                new Color(255, 214, 10)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PRESS ENTER TO RESTART",
+                GameSettings.ScreenWidth,
+                325,
+                3,
+                new Color(0, 217, 255)
+            );
+        }
+
+        if (_gameState.Current == GameStateType.Win)
+        {
+            DrawPanel(new Color(30, 120, 70, 220));
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "YOU WIN",
+                GameSettings.ScreenWidth,
+                205,
+                5,
+                Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                $"SCORE {_scoreManager.Score}",
+                GameSettings.ScreenWidth,
+                275,
+                3,
+                new Color(255, 214, 10)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PRESS ENTER TO RESTART",
+                GameSettings.ScreenWidth,
+                325,
+                3,
+                new Color(0, 217, 255)
+            );
+        }
+    }
+
+    private void DrawBackground()
+    {
+        for (int y = 0; y < GameSettings.ScreenHeight; y += 60)
+        {
+            DrawRect(
+                new Rectangle(0, y, GameSettings.ScreenWidth, 2),
+                new Color(255, 255, 255, 25)
+            );
+        }
+
+        for (int x = 0; x < GameSettings.ScreenWidth; x += 90)
+        {
+            DrawRect(
+                new Rectangle(x, 0, 2, GameSettings.ScreenHeight),
+                new Color(255, 255, 255, 18)
+            );
         }
     }
 
     private void DrawHud()
     {
-        DrawRect(new Rectangle(0, 0, ScreenWidth, 52), new Color(0, 0, 0, 120));
+        DrawRect(
+            new Rectangle(0, 0, GameSettings.ScreenWidth, 52),
+            new Color(0, 0, 0, 120)
+        );
 
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            $"SCORE {_gameState.Score}",
+            $"SCORE {_scoreManager.Score}",
             new Vector2(20, 18),
             3,
             Color.White
@@ -388,7 +460,7 @@ public sealed class Game1 : Game
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            $"BEST {_highScore}",
+            $"BEST {_scoreManager.HighScore}",
             new Vector2(570, 18),
             3,
             new Color(255, 214, 10)
@@ -420,8 +492,8 @@ public sealed class Game1 : Game
     private void DrawPanel(Color color)
     {
         var panel = new Rectangle(
-            ScreenWidth / 2 - 300,
-            ScreenHeight / 2 - 140,
+            GameSettings.ScreenWidth / 2 - 300,
+            GameSettings.ScreenHeight / 2 - 140,
             600,
             280
         );
