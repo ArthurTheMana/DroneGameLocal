@@ -23,9 +23,12 @@ public sealed class Game1 : Game
     private readonly InputManager _inputManager = new();
     private readonly ScoreManager _scoreManager = new();
     private readonly ObstacleSpawner _obstacleSpawner = new();
+    private readonly Starfield _starfield = new(120);
+    private readonly ParticleSystem _particles = new();
 
     private float _collisionCooldown;
-
+    private float _screenShakeTimer;
+    private readonly System.Random _visualRandom = new();
     public Game1()
     {
         _graphics = new GraphicsDeviceManager(this);
@@ -53,6 +56,16 @@ public sealed class Game1 : Game
 
     protected override void Update(GameTime gameTime)
     {
+        float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
+        _starfield.Update(deltaTime);
+        _particles.Update(deltaTime);
+
+        if (_screenShakeTimer > 0f)
+        {
+            _screenShakeTimer -= deltaTime;
+        }
+
         _inputManager.Update();
 
         if (_inputManager.IsKeyPressed(Keys.Escape))
@@ -206,6 +219,14 @@ public sealed class Game1 : Game
             return;
         }
 
+        Vector2 crashPosition = new Vector2(
+            _drone.Position.X + _drone.Width / 2f,
+            _drone.Position.Y + _drone.Height / 2f
+        );
+
+        _particles.EmitCrash(crashPosition);
+        _screenShakeTimer = 0.25f;
+
         _gameState.LoseLife();
 
         _obstacles.Clear();
@@ -214,7 +235,6 @@ public sealed class Game1 : Game
             GameSettings.StartDroneX,
             GameSettings.StartDroneY
         );
-
         _collisionCooldown = GameSettings.CollisionCooldownSeconds;
 
         if (_gameState.Current == GameStateType.Fail)
@@ -243,11 +263,19 @@ public sealed class Game1 : Game
             return;
         }
 
-        _spriteBatch.Begin();
+        Vector2 shakeOffset = GetScreenShakeOffset();
 
-        DrawBackground();
+        _spriteBatch.Begin(
+            transformMatrix: Matrix.CreateTranslation(
+                shakeOffset.X,
+                shakeOffset.Y,
+                0f
+            )
+        );
+
         DrawDrone();
         DrawObstacles();
+        _particles.Draw(_spriteBatch, _pixel);
         DrawHud();
         DrawStateOverlay();
 
@@ -415,11 +443,13 @@ public sealed class Game1 : Game
 
     private void DrawBackground()
     {
+        _starfield.Draw(_spriteBatch!, _pixel!);
+
         for (int y = 0; y < GameSettings.ScreenHeight; y += 60)
         {
             DrawRect(
                 new Rectangle(0, y, GameSettings.ScreenWidth, 2),
-                new Color(255, 255, 255, 25)
+                new Color(255, 255, 255, 18)
             );
         }
 
@@ -427,7 +457,7 @@ public sealed class Game1 : Game
         {
             DrawRect(
                 new Rectangle(x, 0, 2, GameSettings.ScreenHeight),
-                new Color(255, 255, 255, 18)
+                new Color(255, 255, 255, 12)
             );
         }
     }
@@ -485,7 +515,27 @@ public sealed class Game1 : Game
     {
         foreach (Obstacle obstacle in _obstacles)
         {
-            DrawRect(obstacle.GetBounds(), new Color(255, 80, 100));
+            Rectangle body = obstacle.GetBounds();
+
+            DrawRect(body, new Color(255, 80, 100));
+
+            var inner = new Rectangle(
+                body.X + 4,
+                body.Y + 4,
+                body.Width - 8,
+                body.Height - 8
+            );
+
+            DrawRect(inner, new Color(120, 20, 45));
+
+            var warningStripe = new Rectangle(
+                body.X,
+                body.Y,
+                body.Width,
+                5
+            );
+
+            DrawRect(warningStripe, new Color(255, 214, 10));
         }
     }
 
@@ -499,6 +549,21 @@ public sealed class Game1 : Game
         );
 
         DrawRect(panel, color);
+    }
+
+    private Vector2 GetScreenShakeOffset()
+    {
+        if (_screenShakeTimer <= 0f)
+        {
+            return Vector2.Zero;
+        }
+
+        float strength = 5f * (_screenShakeTimer / 0.25f);
+
+        return new Vector2(
+            _visualRandom.NextSingle() * strength - strength / 2f,
+            _visualRandom.NextSingle() * strength - strength / 2f
+        );
     }
 
     private void DrawRect(Rectangle rectangle, Color color)
