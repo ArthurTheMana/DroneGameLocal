@@ -14,10 +14,13 @@ public sealed class GameState
     public GameStateType Current { get; private set; } = GameStateType.Start;
     public int Lives { get; private set; } = 3;
 
-    public void StartGame()
+    // LEVEL 3C CHANGE:
+    // Starting lives now comes from the selected difficulty.
+    // Easy gives more lives, Hard gives fewer lives.
+    public void StartGame(int startingLives)
     {
         Current = GameStateType.Playing;
-        Lives = 3;
+        Lives = startingLives;
     }
 
     public void Pause()

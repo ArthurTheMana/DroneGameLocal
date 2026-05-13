@@ -23,12 +23,26 @@ public sealed class Game1 : Game
     private readonly InputManager _inputManager = new();
     private readonly ScoreManager _scoreManager = new();
     private readonly ObstacleSpawner _obstacleSpawner = new();
+
     private readonly Starfield _starfield = new(120);
     private readonly ParticleSystem _particles = new();
 
+    // LEVEL 3C CHANGE:
+    // The player can choose the difficulty from the start screen.
+    // Normal is the default mode.
+    private DifficultyLevel _selectedDifficulty = DifficultyLevel.Normal;
+
+    // LEVEL 3C CHANGE:
+    // These settings control lives, obstacle speed, spawn rate,
+    // and how fast the game becomes harder.
+    private DifficultySettings _difficultySettings =
+        DifficultySettings.Get(DifficultyLevel.Normal);
+
     private float _collisionCooldown;
     private float _screenShakeTimer;
+
     private readonly System.Random _visualRandom = new();
+
     public Game1()
     {
         _graphics = new GraphicsDeviceManager(this);
@@ -101,8 +115,39 @@ public sealed class Game1 : Game
         base.Update(gameTime);
     }
 
+    // LEVEL 3C CHANGE:
+    // The start screen now works as a simple difficulty menu.
+    // Player can press A/D, Left/Right, or number keys 1/2/3
+    // to select Easy, Normal, or Hard before starting.
     private void UpdateStartState(GameTime gameTime)
     {
+        if (_inputManager.IsKeyPressed(Keys.Left) ||
+            _inputManager.IsKeyPressed(Keys.A))
+        {
+            SelectPreviousDifficulty();
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.Right) ||
+            _inputManager.IsKeyPressed(Keys.D))
+        {
+            SelectNextDifficulty();
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.D1))
+        {
+            SetDifficulty(DifficultyLevel.Easy);
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.D2))
+        {
+            SetDifficulty(DifficultyLevel.Normal);
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.D3))
+        {
+            SetDifficulty(DifficultyLevel.Hard);
+        }
+
         if (_inputManager.IsKeyPressed(Keys.Enter) ||
             _inputManager.IsKeyPressed(Keys.Space))
         {
@@ -135,20 +180,37 @@ public sealed class Game1 : Game
         }
 
         HandleDroneMovement(deltaTime);
-        _obstacleSpawner.Update(deltaTime, _obstacles, _scoreManager.Score);
+
+        // LEVEL 3C CHANGE:
+        // Obstacle spawning now uses the current difficulty settings.
+        // The game keeps getting harder as score and time increase.
+        _obstacleSpawner.Update(
+            deltaTime,
+            _obstacles,
+            _scoreManager.Score,
+            _difficultySettings
+        );
+
         UpdateObstacles(deltaTime);
         CheckCollision();
-        CheckWin();
+
+        // LEVEL 3C CHANGE:
+        // We removed the fixed win score.
+        // The game is now endless and only ends when the player loses all lives.
 
         Window.Title =
-            $"Score: {_scoreManager.Score}/{GameSettings.WinScore} | " +
+            $"Score: {_scoreManager.Score} | " +
             $"Lives: {_gameState.Lives} | " +
-            $"Best: {_scoreManager.HighScore}";
+            $"Best: {_scoreManager.HighScore} | " +
+            $"Mode: {_difficultySettings.Name}";
     }
 
     private void StartNewGame()
     {
-        _gameState.StartGame();
+        // LEVEL 3C CHANGE:
+        // Starting lives now depends on the selected difficulty.
+        _gameState.StartGame(_difficultySettings.StartingLives);
+
         _scoreManager.ResetScore();
 
         _drone.Reset(
@@ -157,9 +219,49 @@ public sealed class Game1 : Game
         );
 
         _obstacles.Clear();
-        _obstacleSpawner.Reset();
+
+        // LEVEL 3C CHANGE:
+        // Reset obstacle spawning using the selected difficulty settings.
+        _obstacleSpawner.Reset(_difficultySettings);
 
         _collisionCooldown = 0f;
+        _screenShakeTimer = 0f;
+    }
+
+    // LEVEL 3C CHANGE:
+    // Updates the selected difficulty and loads the matching settings.
+    private void SetDifficulty(DifficultyLevel level)
+    {
+        _selectedDifficulty = level;
+        _difficultySettings = DifficultySettings.Get(level);
+    }
+
+    // LEVEL 3C CHANGE:
+    // Move to the next difficulty option in the start menu.
+    private void SelectNextDifficulty()
+    {
+        DifficultyLevel next = _selectedDifficulty switch
+        {
+            DifficultyLevel.Easy => DifficultyLevel.Normal,
+            DifficultyLevel.Normal => DifficultyLevel.Hard,
+            _ => DifficultyLevel.Easy
+        };
+
+        SetDifficulty(next);
+    }
+
+    // LEVEL 3C CHANGE:
+    // Move to the previous difficulty option in the start menu.
+    private void SelectPreviousDifficulty()
+    {
+        DifficultyLevel previous = _selectedDifficulty switch
+        {
+            DifficultyLevel.Hard => DifficultyLevel.Normal,
+            DifficultyLevel.Normal => DifficultyLevel.Easy,
+            _ => DifficultyLevel.Hard
+        };
+
+        SetDifficulty(previous);
     }
 
     private void TogglePause()
@@ -200,7 +302,11 @@ public sealed class Game1 : Game
                 obstacle.Position.X + obstacle.Width < _drone.Position.X)
             {
                 obstacle.ScoreCounted = true;
-                _scoreManager.AddScore(10);
+
+                // LEVEL 3C CHANGE:
+                // Points per obstacle now depends on difficulty.
+                // Hard mode can reward more points because it is harder.
+                _scoreManager.AddScore(_difficultySettings.PointsPerObstacle);
             }
 
             if (obstacle.IsOffScreen())
@@ -235,23 +341,13 @@ public sealed class Game1 : Game
             GameSettings.StartDroneX,
             GameSettings.StartDroneY
         );
+
         _collisionCooldown = GameSettings.CollisionCooldownSeconds;
 
         if (_gameState.Current == GameStateType.Fail)
         {
             _scoreManager.SaveHighScoreIfNeeded();
         }
-    }
-
-    private void CheckWin()
-    {
-        if (!_scoreManager.HasReachedWinScore())
-        {
-            return;
-        }
-
-        _gameState.Win();
-        _scoreManager.SaveHighScoreIfNeeded();
     }
 
     protected override void Draw(GameTime gameTime)
@@ -273,6 +369,7 @@ public sealed class Game1 : Game
             )
         );
 
+        DrawBackground();
         DrawDrone();
         DrawObstacles();
         _particles.Draw(_spriteBatch, _pixel);
@@ -325,6 +422,8 @@ public sealed class Game1 : Game
             );
         }
 
+        // LEVEL 3C CHANGE:
+        // Start screen now also works as the difficulty selection menu.
         if (_gameState.Current == GameStateType.Start)
         {
             DrawPanel(new Color(30, 70, 120, 210));
@@ -334,7 +433,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "DRONE GAME",
                 GameSettings.ScreenWidth,
-                190,
+                165,
                 5,
                 Color.White
             );
@@ -342,9 +441,39 @@ public sealed class Game1 : Game
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
-                "PRESS ENTER TO START",
+                $"MODE {_difficultySettings.Name}",
                 GameSettings.ScreenWidth,
-                270,
+                230,
+                4,
+                new Color(255, 214, 10)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "A D OR LEFT RIGHT TO CHANGE",
+                GameSettings.ScreenWidth,
+                285,
+                2,
+                new Color(0, 217, 255)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "1 EASY  2 NORMAL  3 HARD",
+                GameSettings.ScreenWidth,
+                315,
+                2,
+                Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "ENTER TO START",
+                GameSettings.ScreenWidth,
+                350,
                 3,
                 new Color(0, 217, 255)
             );
@@ -352,21 +481,11 @@ public sealed class Game1 : Game
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
-                "WASD OR ARROWS TO MOVE",
+                "ENDLESS SCORE MODE",
                 GameSettings.ScreenWidth,
-                315,
+                390,
                 2,
                 new Color(255, 214, 10)
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "P TO PAUSE / ESC TO QUIT",
-                GameSettings.ScreenWidth,
-                345,
-                2,
-                Color.White
             );
         }
 
@@ -462,10 +581,13 @@ public sealed class Game1 : Game
         }
     }
 
+    // LEVEL 3C CHANGE:
+    // HUD now also shows the selected difficulty mode.
+    // Score is endless, so we no longer show Score / WinScore.
     private void DrawHud()
     {
         DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, 52),
+            new Rectangle(0, 0, GameSettings.ScreenWidth, 76),
             new Color(0, 0, 0, 120)
         );
 
@@ -494,6 +616,15 @@ public sealed class Game1 : Game
             new Vector2(570, 18),
             3,
             new Color(255, 214, 10)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"MODE {_difficultySettings.Name}",
+            new Vector2(20, 52),
+            2,
+            Color.White
         );
     }
 
