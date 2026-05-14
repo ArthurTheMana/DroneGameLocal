@@ -10,16 +10,22 @@ public enum DifficultyLevel
     Hard
 }
 
-// LEVEL 3C CHANGE:
-// DifficultySettings contains the gameplay numbers for each mode.
-// Instead of hardcoding everything inside Game1.cs,
-// we keep the difficulty values here.
+// LEVEL 3E CHANGE:
+// DifficultySettings now has StartingMaxObstacles and SecondsToReachMaxObstacles.
+// This allows the game to start with fewer obstacles,
+// then slowly increase the active obstacle limit over time.
 public sealed class DifficultySettings
 {
     public string Name { get; init; } = "Normal";
 
     public int StartingLives { get; init; }
+
+    // LEVEL 3E CHANGE:
+    // StartingMaxObstacles = how many obstacles can appear near the beginning.
+    // MaxObstacles = final maximum obstacle pressure.
+    public int StartingMaxObstacles { get; init; }
     public int MaxObstacles { get; init; }
+
     public int PointsPerObstacle { get; init; }
 
     public float InitialSpawnInterval { get; init; }
@@ -31,11 +37,10 @@ public sealed class DifficultySettings
     public float MaxObstacleSpeed { get; init; }
     public float ScoreSpeedMultiplier { get; init; }
 
-    // LEVEL 3C CHANGE:
-    // This method returns the correct settings based on the selected difficulty.
-    // Easy is slower and gives more lives.
-    // Normal is balanced.
-    // Hard is faster and gives fewer lives.
+    // LEVEL 3E CHANGE:
+    // Time needed to reach the maximum obstacle pressure.
+    public float SecondsToReachMaxObstacles { get; init; }
+
     public static DifficultySettings Get(DifficultyLevel level)
     {
         return level switch
@@ -44,51 +49,63 @@ public sealed class DifficultySettings
             {
                 Name = "Easy",
                 StartingLives = 5,
-                MaxObstacles = 6,
+
+                StartingMaxObstacles = 3,
+                MaxObstacles = 8,
+                SecondsToReachMaxObstacles = 100f,
+
                 PointsPerObstacle = 10,
 
-                InitialSpawnInterval = 1.45f,
-                MinimumSpawnInterval = 0.85f,
+                InitialSpawnInterval = 1.25f,
+                MinimumSpawnInterval = 0.75f,
                 SpawnIntervalDecrease = 0.05f,
-                DifficultyIncreaseEverySeconds = 14f,
+                DifficultyIncreaseEverySeconds = 13f,
 
                 MinObstacleSpeed = 140f,
-                MaxObstacleSpeed = 220f,
-                ScoreSpeedMultiplier = 0.18f
+                MaxObstacleSpeed = 230f,
+                ScoreSpeedMultiplier = 0.20f
             },
 
             DifficultyLevel.Hard => new DifficultySettings
             {
                 Name = "Hard",
                 StartingLives = 2,
-                MaxObstacles = 10,
+
+                StartingMaxObstacles = 5,
+                MaxObstacles = 16,
+                SecondsToReachMaxObstacles = 70f,
+
                 PointsPerObstacle = 15,
 
-                InitialSpawnInterval = 0.95f,
-                MinimumSpawnInterval = 0.45f,
-                SpawnIntervalDecrease = 0.09f,
-                DifficultyIncreaseEverySeconds = 8f,
+                InitialSpawnInterval = 0.80f,
+                MinimumSpawnInterval = 0.35f,
+                SpawnIntervalDecrease = 0.10f,
+                DifficultyIncreaseEverySeconds = 7f,
 
                 MinObstacleSpeed = 220f,
-                MaxObstacleSpeed = 340f,
-                ScoreSpeedMultiplier = 0.55f
+                MaxObstacleSpeed = 360f,
+                ScoreSpeedMultiplier = 0.60f
             },
 
             _ => new DifficultySettings
             {
                 Name = "Normal",
                 StartingLives = 3,
-                MaxObstacles = 8,
+
+                StartingMaxObstacles = 4,
+                MaxObstacles = 12,
+                SecondsToReachMaxObstacles = 90f,
+
                 PointsPerObstacle = 10,
 
-                InitialSpawnInterval = 1.15f,
-                MinimumSpawnInterval = 0.65f,
+                InitialSpawnInterval = 1.00f,
+                MinimumSpawnInterval = 0.55f,
                 SpawnIntervalDecrease = 0.08f,
-                DifficultyIncreaseEverySeconds = 10f,
+                DifficultyIncreaseEverySeconds = 9f,
 
                 MinObstacleSpeed = 180f,
-                MaxObstacleSpeed = 280f,
-                ScoreSpeedMultiplier = 0.35f
+                MaxObstacleSpeed = 300f,
+                ScoreSpeedMultiplier = 0.40f
             }
         };
     }

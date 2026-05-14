@@ -581,13 +581,17 @@ public sealed class Game1 : Game
         }
     }
 
-    // LEVEL 3C CHANGE:
-    // HUD now also shows the selected difficulty mode.
-    // Score is endless, so we no longer show Score / WinScore.
+    // LEVEL 3E CHANGE:
+    // HUD now shows:
+    // - Score
+    // - Lives
+    // - Best score
+    // - Difficulty mode
+    // - Obstacle pressure progression bar
     private void DrawHud()
     {
         DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, 76),
+            new Rectangle(0, 0, GameSettings.ScreenWidth, 104),
             new Color(0, 0, 0, 120)
         );
 
@@ -626,8 +630,25 @@ public sealed class Game1 : Game
             2,
             Color.White
         );
-    }
 
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"OBSTACLES {_obstacleSpawner.CurrentMaxObstacles}/{_difficultySettings.MaxObstacles}",
+            new Vector2(20, 78),
+            2,
+            new Color(255, 214, 10)
+        );
+
+        DrawProgressBar(
+            x: 360,
+            y: 80,
+            width: 320,
+            height: 14,
+            progress: _obstacleSpawner.ProgressPercent
+        );
+    }
+    
     private void DrawDrone()
     {
         DrawRect(_drone.GetBounds(), new Color(0, 217, 255));
@@ -694,6 +715,32 @@ public sealed class Game1 : Game
         return new Vector2(
             _visualRandom.NextSingle() * strength - strength / 2f,
             _visualRandom.NextSingle() * strength - strength / 2f
+        );
+    }
+
+    // LEVEL 3E CHANGE:
+    // Draws the obstacle pressure progress bar.
+    // The bar fills as the player survives longer.
+    // When full, the game has reached the maximum obstacle limit.
+    private void DrawProgressBar(int x, int y, int width, int height, float progress)
+    {
+        progress = MathHelper.Clamp(progress, 0f, 1f);
+
+        DrawRect(
+            new Rectangle(x, y, width, height),
+            new Color(255, 255, 255, 40)
+        );
+
+        DrawRect(
+            new Rectangle(x + 2, y + 2, width - 4, height - 4),
+            new Color(20, 20, 20, 200)
+        );
+
+        int fillWidth = (int)((width - 4) * progress);
+
+        DrawRect(
+            new Rectangle(x + 2, y + 2, fillWidth, height - 4),
+            new Color(255, 214, 10)
         );
     }
 

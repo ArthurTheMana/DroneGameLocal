@@ -11,21 +11,35 @@ public sealed class ObstacleSpawner
     private float _difficultyTimer;
     private float _spawnInterval;
 
-    // LEVEL 3C CHANGE:
-    // The spawner now uses DifficultySettings.
-    // This lets Easy, Normal, and Hard have different spawn rates and speeds.
+    // LEVEL 3E CHANGE:
+    // This tracks how long the player has survived in the current run.
+    // The longer the player survives, the more obstacles are allowed.
+    private float _survivalTimer;
+
     private DifficultySettings _settings =
         DifficultySettings.Get(DifficultyLevel.Normal);
 
-    // LEVEL 3C CHANGE:
-    // Reset uses the selected difficulty when a new game starts.
+    // LEVEL 3E CHANGE:
+    // CurrentMaxObstacles grows over time from StartingMaxObstacles to MaxObstacles.
+    public int CurrentMaxObstacles { get; private set; }
+
+    // LEVEL 3E CHANGE:
+    // ProgressPercent is used by the HUD progress bar.
+    // 0 = start of run, 1 = reached maximum obstacle pressure.
+    public float ProgressPercent { get; private set; }
+
     public void Reset(DifficultySettings settings)
     {
         _settings = settings;
 
         _spawnTimer = 0f;
         _difficultyTimer = 0f;
+        _survivalTimer = 0f;
+
         _spawnInterval = settings.InitialSpawnInterval;
+
+        CurrentMaxObstacles = settings.StartingMaxObstacles;
+        ProgressPercent = 0f;
     }
 
     public void Update(
@@ -38,7 +52,9 @@ public sealed class ObstacleSpawner
 
         _spawnTimer += deltaTime;
         _difficultyTimer += deltaTime;
+        _survivalTimer += deltaTime;
 
+        UpdateObstacleProgression();
         IncreaseDifficultyIfNeeded();
 
         if (_spawnTimer < _spawnInterval)
@@ -46,7 +62,10 @@ public sealed class ObstacleSpawner
             return;
         }
 
-        if (obstacles.Count >= _settings.MaxObstacles)
+        // LEVEL 3E CHANGE:
+        // Instead of using the final MaxObstacles immediately,
+        // we use CurrentMaxObstacles, which grows over time.
+        if (obstacles.Count >= CurrentMaxObstacles)
         {
             return;
         }
@@ -57,10 +76,38 @@ public sealed class ObstacleSpawner
         obstacles.Add(obstacle);
     }
 
-    // LEVEL 3C CHANGE:
-    // The game gets harder over time.
-    // Every few seconds, the spawn interval becomes shorter,
-    // so obstacles appear more often.
+    // LEVEL 3E CHANGE:
+    // This is the core of the progression bar system.
+    // More survival time = higher ProgressPercent = more allowed obstacles.
+    private void UpdateObstacleProgression()
+    {
+        if (_settings.SecondsToReachMaxObstacles <= 0f)
+        {
+            ProgressPercent = 1f;
+        }
+        else
+        {
+            ProgressPercent = Math.Clamp(
+                _survivalTimer / _settings.SecondsToReachMaxObstacles,
+                0f,
+                1f
+            );
+        }
+
+        int obstacleRange =
+            _settings.MaxObstacles - _settings.StartingMaxObstacles;
+
+        CurrentMaxObstacles =
+            _settings.StartingMaxObstacles +
+            (int)MathF.Round(obstacleRange * ProgressPercent);
+
+        CurrentMaxObstacles = Math.Clamp(
+            CurrentMaxObstacles,
+            _settings.StartingMaxObstacles,
+            _settings.MaxObstacles
+        );
+    }
+
     private void IncreaseDifficultyIfNeeded()
     {
         if (_difficultyTimer < _settings.DifficultyIncreaseEverySeconds)
@@ -91,10 +138,9 @@ public sealed class ObstacleSpawner
             (int)_settings.MaxObstacleSpeed
         );
 
-        // LEVEL 3C CHANGE:
-        // Obstacle speed increases as the player's score gets higher.
-        // This creates endless progressive difficulty.
-        float speed = baseSpeed + currentScore * _settings.ScoreSpeedMultiplier;
+        float speed =
+            baseSpeed +
+            currentScore * _settings.ScoreSpeedMultiplier;
 
         return new Obstacle(
             GameSettings.ScreenWidth,
