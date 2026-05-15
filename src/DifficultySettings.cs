@@ -1,8 +1,5 @@
 namespace DroneGameLocal;
 
-// LEVEL 3C CHANGE:
-// DifficultyLevel is used by the start menu.
-// The player can choose Easy, Normal, or Hard before starting the game.
 public enum DifficultyLevel
 {
     Easy,
@@ -10,21 +7,15 @@ public enum DifficultyLevel
     Hard
 }
 
-// LEVEL 3E CHANGE:
-// DifficultySettings now has StartingMaxObstacles and SecondsToReachMaxObstacles.
-// This allows the game to start with fewer obstacles,
-// then slowly increase the active obstacle limit over time.
 public sealed class DifficultySettings
 {
     public string Name { get; init; } = "Normal";
 
     public int StartingLives { get; init; }
 
-    // LEVEL 3E CHANGE:
-    // StartingMaxObstacles = how many obstacles can appear near the beginning.
-    // MaxObstacles = final maximum obstacle pressure.
     public int StartingMaxObstacles { get; init; }
     public int MaxObstacles { get; init; }
+    public float SecondsToReachMaxObstacles { get; init; }
 
     public int PointsPerObstacle { get; init; }
 
@@ -37,9 +28,22 @@ public sealed class DifficultySettings
     public float MaxObstacleSpeed { get; init; }
     public float ScoreSpeedMultiplier { get; init; }
 
-    // LEVEL 3E CHANGE:
-    // Time needed to reach the maximum obstacle pressure.
-    public float SecondsToReachMaxObstacles { get; init; }
+    // LEVEL 4A CHANGE:
+    // Enemy progression settings.
+    public int StartingMaxEnemies { get; init; }
+    public int MaxEnemies { get; init; }
+    public float SecondsToReachMaxEnemies { get; init; }
+
+    public float InitialEnemySpawnInterval { get; init; }
+    public float MinimumEnemySpawnInterval { get; init; }
+    public float EnemySpawnIntervalDecrease { get; init; }
+    public float EnemyDifficultyIncreaseEverySeconds { get; init; }
+
+    public float MinEnemySpeed { get; init; }
+    public float MaxEnemySpeed { get; init; }
+    public float EnemyScoreSpeedMultiplier { get; init; }
+
+    public int PointsPerEnemy { get; init; }
 
     public static DifficultySettings Get(DifficultyLevel level)
     {
@@ -63,7 +67,22 @@ public sealed class DifficultySettings
 
                 MinObstacleSpeed = 140f,
                 MaxObstacleSpeed = 230f,
-                ScoreSpeedMultiplier = 0.20f
+                ScoreSpeedMultiplier = 0.20f,
+
+                StartingMaxEnemies = 0,
+                MaxEnemies = 2,
+                SecondsToReachMaxEnemies = 90f,
+
+                InitialEnemySpawnInterval = 5.0f,
+                MinimumEnemySpawnInterval = 3.8f,
+                EnemySpawnIntervalDecrease = 0.15f,
+                EnemyDifficultyIncreaseEverySeconds = 18f,
+
+                MinEnemySpeed = 90f,
+                MaxEnemySpeed = 140f,
+                EnemyScoreSpeedMultiplier = 0.08f,
+
+                PointsPerEnemy = 25
             },
 
             DifficultyLevel.Hard => new DifficultySettings
@@ -84,7 +103,22 @@ public sealed class DifficultySettings
 
                 MinObstacleSpeed = 220f,
                 MaxObstacleSpeed = 360f,
-                ScoreSpeedMultiplier = 0.60f
+                ScoreSpeedMultiplier = 0.60f,
+
+                StartingMaxEnemies = 2,
+                MaxEnemies = 6,
+                SecondsToReachMaxEnemies = 55f,
+
+                InitialEnemySpawnInterval = 3.0f,
+                MinimumEnemySpawnInterval = 1.8f,
+                EnemySpawnIntervalDecrease = 0.20f,
+                EnemyDifficultyIncreaseEverySeconds = 10f,
+
+                MinEnemySpeed = 150f,
+                MaxEnemySpeed = 240f,
+                EnemyScoreSpeedMultiplier = 0.18f,
+
+                PointsPerEnemy = 40
             },
 
             _ => new DifficultySettings
@@ -105,7 +139,22 @@ public sealed class DifficultySettings
 
                 MinObstacleSpeed = 180f,
                 MaxObstacleSpeed = 300f,
-                ScoreSpeedMultiplier = 0.40f
+                ScoreSpeedMultiplier = 0.40f,
+
+                StartingMaxEnemies = 1,
+                MaxEnemies = 4,
+                SecondsToReachMaxEnemies = 70f,
+
+                InitialEnemySpawnInterval = 4.0f,
+                MinimumEnemySpawnInterval = 2.5f,
+                EnemySpawnIntervalDecrease = 0.18f,
+                EnemyDifficultyIncreaseEverySeconds = 14f,
+
+                MinEnemySpeed = 110f,
+                MaxEnemySpeed = 180f,
+                EnemyScoreSpeedMultiplier = 0.12f,
+
+                PointsPerEnemy = 30
             }
         };
     }

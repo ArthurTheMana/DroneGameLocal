@@ -21,6 +21,15 @@ public sealed class InputManager
                !_previousKeyboard.IsKeyDown(key);
     }
 
+    // LEVEL 4A CHANGE:
+    // Needed for charged shot.
+    // We fire the shot when player releases J.
+    public bool IsKeyReleased(Keys key)
+    {
+        return !CurrentKeyboard.IsKeyDown(key) &&
+               _previousKeyboard.IsKeyDown(key);
+    }
+
     public bool IsKeyDown(Keys key)
     {
         return CurrentKeyboard.IsKeyDown(key);

@@ -19,27 +19,42 @@ public sealed class Game1 : Game
 
     private readonly List<Obstacle> _obstacles = new();
 
+    // LEVEL 4A CHANGE:
+    // Enemies are separate from obstacles.
+    // They move differently and can be destroyed by charged shots.
+    private readonly List<Enemy> _enemies = new();
+
+    // LEVEL 4A CHANGE:
+    // Charged shots fired by the player.
+    private readonly List<ChargeShot> _shots = new();
+
     private readonly GameState _gameState = new();
     private readonly InputManager _inputManager = new();
     private readonly ScoreManager _scoreManager = new();
+
     private readonly ObstacleSpawner _obstacleSpawner = new();
+
+    // LEVEL 4A CHANGE:
+    // New enemy spawner. It controls enemy spawn rate and enemy progression.
+    private readonly EnemySpawner _enemySpawner = new();
 
     private readonly Starfield _starfield = new(120);
     private readonly ParticleSystem _particles = new();
 
-    // LEVEL 3C CHANGE:
-    // The player can choose the difficulty from the start screen.
-    // Normal is the default mode.
     private DifficultyLevel _selectedDifficulty = DifficultyLevel.Normal;
 
-    // LEVEL 3C CHANGE:
-    // These settings control lives, obstacle speed, spawn rate,
-    // and how fast the game becomes harder.
     private DifficultySettings _difficultySettings =
         DifficultySettings.Get(DifficultyLevel.Normal);
 
     private float _collisionCooldown;
     private float _screenShakeTimer;
+
+    // LEVEL 4A CHANGE:
+    // Charge shot state.
+    // Hold J to charge. Release J to fire.
+    private float _shotChargeTimer;
+    private float _shotCooldownTimer;
+    private bool _isChargingShot;
 
     private readonly System.Random _visualRandom = new();
 
@@ -115,10 +130,6 @@ public sealed class Game1 : Game
         base.Update(gameTime);
     }
 
-    // LEVEL 3C CHANGE:
-    // The start screen now works as a simple difficulty menu.
-    // Player can press A/D, Left/Right, or number keys 1/2/3
-    // to select Easy, Normal, or Hard before starting.
     private void UpdateStartState(GameTime gameTime)
     {
         if (_inputManager.IsKeyPressed(Keys.Left) ||
@@ -179,11 +190,17 @@ public sealed class Game1 : Game
             return;
         }
 
+        if (_shotCooldownTimer > 0f)
+        {
+            _shotCooldownTimer -= deltaTime;
+        }
+
         HandleDroneMovement(deltaTime);
 
-        // LEVEL 3C CHANGE:
-        // Obstacle spawning now uses the current difficulty settings.
-        // The game keeps getting harder as score and time increase.
+        // LEVEL 4A CHANGE:
+        // Player can hold J to charge and release J to shoot.
+        HandleChargeShot(deltaTime);
+
         _obstacleSpawner.Update(
             deltaTime,
             _obstacles,
@@ -191,12 +208,26 @@ public sealed class Game1 : Game
             _difficultySettings
         );
 
-        UpdateObstacles(deltaTime);
-        CheckCollision();
+        // LEVEL 4A CHANGE:
+        // Enemy spawner works like obstacle progression.
+        // More survival time means more enemies are allowed.
+        _enemySpawner.Update(
+            deltaTime,
+            _enemies,
+            _scoreManager.Score,
+            _difficultySettings
+        );
 
-        // LEVEL 3C CHANGE:
-        // We removed the fixed win score.
-        // The game is now endless and only ends when the player loses all lives.
+        UpdateObstacles(deltaTime);
+        UpdateEnemies(deltaTime);
+        UpdateShots(deltaTime);
+
+        // LEVEL 4A CHANGE:
+        // Shots can destroy enemies.
+        // Strong charged shots can also destroy obstacles.
+        CheckShotHits();
+
+        CheckCollision();
 
         Window.Title =
             $"Score: {_scoreManager.Score} | " +
@@ -207,8 +238,6 @@ public sealed class Game1 : Game
 
     private void StartNewGame()
     {
-        // LEVEL 3C CHANGE:
-        // Starting lives now depends on the selected difficulty.
         _gameState.StartGame(_difficultySettings.StartingLives);
 
         _scoreManager.ResetScore();
@@ -219,25 +248,26 @@ public sealed class Game1 : Game
         );
 
         _obstacles.Clear();
+        _enemies.Clear();
+        _shots.Clear();
 
-        // LEVEL 3C CHANGE:
-        // Reset obstacle spawning using the selected difficulty settings.
         _obstacleSpawner.Reset(_difficultySettings);
+        _enemySpawner.Reset(_difficultySettings);
 
         _collisionCooldown = 0f;
         _screenShakeTimer = 0f;
+
+        _shotChargeTimer = 0f;
+        _shotCooldownTimer = 0f;
+        _isChargingShot = false;
     }
 
-    // LEVEL 3C CHANGE:
-    // Updates the selected difficulty and loads the matching settings.
     private void SetDifficulty(DifficultyLevel level)
     {
         _selectedDifficulty = level;
         _difficultySettings = DifficultySettings.Get(level);
     }
 
-    // LEVEL 3C CHANGE:
-    // Move to the next difficulty option in the start menu.
     private void SelectNextDifficulty()
     {
         DifficultyLevel next = _selectedDifficulty switch
@@ -250,8 +280,6 @@ public sealed class Game1 : Game
         SetDifficulty(next);
     }
 
-    // LEVEL 3C CHANGE:
-    // Move to the previous difficulty option in the start menu.
     private void SelectPreviousDifficulty()
     {
         DifficultyLevel previous = _selectedDifficulty switch
@@ -290,6 +318,61 @@ public sealed class Game1 : Game
         );
     }
 
+    // LEVEL 4A CHANGE:
+    // Hold J to charge.
+    // Release J to fire.
+    // This prevents shooting spam because the player must charge first,
+    // and there is also a cooldown after firing.
+    private void HandleChargeShot(float deltaTime)
+    {
+        if (_shotCooldownTimer > 0f)
+        {
+            _isChargingShot = false;
+            _shotChargeTimer = 0f;
+            return;
+        }
+
+        if (_inputManager.IsKeyDown(Keys.J))
+        {
+            _isChargingShot = true;
+
+            _shotChargeTimer = MathHelper.Min(
+                GameSettings.ShotMaxChargeSeconds,
+                _shotChargeTimer + deltaTime
+            );
+        }
+
+        if (_inputManager.IsKeyReleased(Keys.J))
+        {
+            TryFireChargedShot();
+            _isChargingShot = false;
+            _shotChargeTimer = 0f;
+        }
+    }
+
+    private void TryFireChargedShot()
+    {
+        if (_shotChargeTimer < GameSettings.ShotMinChargeSeconds)
+        {
+            return;
+        }
+
+        float chargeRatio = MathHelper.Clamp(
+            _shotChargeTimer / GameSettings.ShotMaxChargeSeconds,
+            0f,
+            1f
+        );
+
+        Vector2 shotPosition = new Vector2(
+            _drone.Position.X + _drone.Width + 4,
+            _drone.Position.Y + _drone.Height / 2f
+        );
+
+        _shots.Add(new ChargeShot(shotPosition, chargeRatio));
+
+        _shotCooldownTimer = GameSettings.ShotCooldownSeconds;
+    }
+
     private void UpdateObstacles(float deltaTime)
     {
         for (int i = _obstacles.Count - 1; i >= 0; i--)
@@ -302,10 +385,6 @@ public sealed class Game1 : Game
                 obstacle.Position.X + obstacle.Width < _drone.Position.X)
             {
                 obstacle.ScoreCounted = true;
-
-                // LEVEL 3C CHANGE:
-                // Points per obstacle now depends on difficulty.
-                // Hard mode can reward more points because it is harder.
                 _scoreManager.AddScore(_difficultySettings.PointsPerObstacle);
             }
 
@@ -316,9 +395,120 @@ public sealed class Game1 : Game
         }
     }
 
+    private void UpdateEnemies(float deltaTime)
+    {
+        for (int i = _enemies.Count - 1; i >= 0; i--)
+        {
+            Enemy enemy = _enemies[i];
+
+            enemy.Update(deltaTime);
+
+            if (enemy.IsOffScreen())
+            {
+                _enemies.RemoveAt(i);
+            }
+        }
+    }
+
+    private void UpdateShots(float deltaTime)
+    {
+        for (int i = _shots.Count - 1; i >= 0; i--)
+        {
+            ChargeShot shot = _shots[i];
+
+            shot.Update(deltaTime);
+
+            if (shot.IsOffScreen())
+            {
+                _shots.RemoveAt(i);
+            }
+        }
+    }
+
+    // LEVEL 4A CHANGE:
+    // Charged shots can destroy enemies.
+    // A strong charged shot can also destroy one obstacle.
+    private void CheckShotHits()
+    {
+        for (int shotIndex = _shots.Count - 1; shotIndex >= 0; shotIndex--)
+        {
+            ChargeShot shot = _shots[shotIndex];
+            Rectangle shotBox = shot.GetBounds();
+
+            bool shotRemoved = false;
+
+            for (int enemyIndex = _enemies.Count - 1; enemyIndex >= 0; enemyIndex--)
+            {
+                Enemy enemy = _enemies[enemyIndex];
+
+                if (!shotBox.Intersects(enemy.GetBounds()))
+                {
+                    continue;
+                }
+
+                Vector2 hitPosition = new Vector2(
+                    enemy.Position.X + enemy.Width / 2f,
+                    enemy.Position.Y + enemy.Height / 2f
+                );
+
+                _particles.EmitCrash(hitPosition);
+                _scoreManager.AddScore(enemy.ScoreReward);
+
+                _enemies.RemoveAt(enemyIndex);
+                _shots.RemoveAt(shotIndex);
+
+                shotRemoved = true;
+                break;
+            }
+
+            if (shotRemoved)
+            {
+                continue;
+            }
+
+            if (!shot.CanBreakObstacle)
+            {
+                continue;
+            }
+
+            for (int obstacleIndex = _obstacles.Count - 1; obstacleIndex >= 0; obstacleIndex--)
+            {
+                Obstacle obstacle = _obstacles[obstacleIndex];
+
+                if (!shotBox.Intersects(obstacle.GetBounds()))
+                {
+                    continue;
+                }
+
+                Vector2 hitPosition = new Vector2(
+                    obstacle.Position.X + obstacle.Width / 2f,
+                    obstacle.Position.Y + obstacle.Height / 2f
+                );
+
+                _particles.EmitCrash(hitPosition);
+
+                _obstacles.RemoveAt(obstacleIndex);
+                _shots.RemoveAt(shotIndex);
+
+                break;
+            }
+        }
+    }
+
     private void CheckCollision()
     {
         bool crashed = CollisionChecker.HasCollision(_drone, _obstacles);
+
+        Rectangle droneBox = _drone.GetBounds();
+
+        foreach (Enemy enemy in _enemies)
+        {
+            if (droneBox.Intersects(enemy.GetBounds()))
+            {
+                crashed = true;
+                break;
+            }
+        }
 
         if (!crashed)
         {
@@ -336,6 +526,8 @@ public sealed class Game1 : Game
         _gameState.LoseLife();
 
         _obstacles.Clear();
+        _enemies.Clear();
+        _shots.Clear();
 
         _drone.Reset(
             GameSettings.StartDroneX,
@@ -372,7 +564,14 @@ public sealed class Game1 : Game
         DrawBackground();
         DrawDrone();
         DrawObstacles();
+
+        // LEVEL 4A CHANGE:
+        // Draw enemies and shots after obstacles.
+        DrawEnemies();
+        DrawShots();
+
         _particles.Draw(_spriteBatch, _pixel);
+
         DrawHud();
         DrawStateOverlay();
 
@@ -422,8 +621,6 @@ public sealed class Game1 : Game
             );
         }
 
-        // LEVEL 3C CHANGE:
-        // Start screen now also works as the difficulty selection menu.
         if (_gameState.Current == GameStateType.Start)
         {
             DrawPanel(new Color(30, 70, 120, 210));
@@ -433,7 +630,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "DRONE GAME",
                 GameSettings.ScreenWidth,
-                165,
+                150,
                 5,
                 Color.White
             );
@@ -443,7 +640,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 $"MODE {_difficultySettings.Name}",
                 GameSettings.ScreenWidth,
-                230,
+                215,
                 4,
                 new Color(255, 214, 10)
             );
@@ -453,7 +650,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "A D OR LEFT RIGHT TO CHANGE",
                 GameSettings.ScreenWidth,
-                285,
+                270,
                 2,
                 new Color(0, 217, 255)
             );
@@ -463,7 +660,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "1 EASY  2 NORMAL  3 HARD",
                 GameSettings.ScreenWidth,
-                315,
+                300,
                 2,
                 Color.White
             );
@@ -473,7 +670,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "ENTER TO START",
                 GameSettings.ScreenWidth,
-                350,
+                335,
                 3,
                 new Color(0, 217, 255)
             );
@@ -481,11 +678,21 @@ public sealed class Game1 : Game
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
-                "ENDLESS SCORE MODE",
+                "HOLD J RELEASE TO SHOOT",
                 GameSettings.ScreenWidth,
-                390,
+                380,
                 2,
                 new Color(255, 214, 10)
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "ENDLESS SCORE MODE",
+                GameSettings.ScreenWidth,
+                410,
+                2,
+                Color.White
             );
         }
 
@@ -581,17 +788,10 @@ public sealed class Game1 : Game
         }
     }
 
-    // LEVEL 3E CHANGE:
-    // HUD now shows:
-    // - Score
-    // - Lives
-    // - Best score
-    // - Difficulty mode
-    // - Obstacle pressure progression bar
     private void DrawHud()
     {
         DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, 104),
+            new Rectangle(0, 0, GameSettings.ScreenWidth, 132),
             new Color(0, 0, 0, 120)
         );
 
@@ -647,8 +847,60 @@ public sealed class Game1 : Game
             height: 14,
             progress: _obstacleSpawner.ProgressPercent
         );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"ENEMIES {_enemySpawner.CurrentMaxEnemies}/{_difficultySettings.MaxEnemies}",
+            new Vector2(20, 104),
+            2,
+            new Color(255, 140, 40)
+        );
+
+        DrawProgressBar(
+            x: 360,
+            y: 106,
+            width: 320,
+            height: 14,
+            progress: _enemySpawner.ProgressPercent
+        );
+
+        float shotProgress = MathHelper.Clamp(
+            _shotChargeTimer / GameSettings.ShotMaxChargeSeconds,
+            0f,
+            1f
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            "SHOT J",
+            new Vector2(700, 52),
+            2,
+            new Color(0, 217, 255)
+        );
+
+        DrawProgressBar(
+            x: 700,
+            y: 80,
+            width: 150,
+            height: 14,
+            progress: _shotCooldownTimer > 0f ? 0f : shotProgress
+        );
+
+        if (_isChargingShot)
+        {
+            PixelText.DrawText(
+                _spriteBatch!,
+                _pixel!,
+                "CHARGING",
+                new Vector2(700, 104),
+                2,
+                new Color(255, 214, 10)
+            );
+        }
     }
-    
+
     private void DrawDrone()
     {
         DrawRect(_drone.GetBounds(), new Color(0, 217, 255));
@@ -691,6 +943,53 @@ public sealed class Game1 : Game
         }
     }
 
+    private void DrawEnemies()
+    {
+        foreach (Enemy enemy in _enemies)
+        {
+            Rectangle body = enemy.GetBounds();
+
+            DrawRect(body, new Color(255, 140, 40));
+
+            var inner = new Rectangle(
+                body.X + 5,
+                body.Y + 5,
+                body.Width - 10,
+                body.Height - 10
+            );
+
+            DrawRect(inner, new Color(100, 45, 10));
+
+            var eye = new Rectangle(
+                body.X + body.Width - 11,
+                body.Y + 10,
+                5,
+                5
+            );
+
+            DrawRect(eye, Color.White);
+        }
+    }
+
+    private void DrawShots()
+    {
+        foreach (ChargeShot shot in _shots)
+        {
+            Rectangle body = shot.GetBounds();
+
+            DrawRect(body, new Color(0, 217, 255));
+
+            var core = new Rectangle(
+                body.X + 3,
+                body.Y + 2,
+                body.Width - 6,
+                body.Height - 4
+            );
+
+            DrawRect(core, Color.White);
+        }
+    }
+
     private void DrawPanel(Color color)
     {
         var panel = new Rectangle(
@@ -703,25 +1002,6 @@ public sealed class Game1 : Game
         DrawRect(panel, color);
     }
 
-    private Vector2 GetScreenShakeOffset()
-    {
-        if (_screenShakeTimer <= 0f)
-        {
-            return Vector2.Zero;
-        }
-
-        float strength = 5f * (_screenShakeTimer / 0.25f);
-
-        return new Vector2(
-            _visualRandom.NextSingle() * strength - strength / 2f,
-            _visualRandom.NextSingle() * strength - strength / 2f
-        );
-    }
-
-    // LEVEL 3E CHANGE:
-    // Draws the obstacle pressure progress bar.
-    // The bar fills as the player survives longer.
-    // When full, the game has reached the maximum obstacle limit.
     private void DrawProgressBar(int x, int y, int width, int height, float progress)
     {
         progress = MathHelper.Clamp(progress, 0f, 1f);
@@ -741,6 +1021,21 @@ public sealed class Game1 : Game
         DrawRect(
             new Rectangle(x + 2, y + 2, fillWidth, height - 4),
             new Color(255, 214, 10)
+        );
+    }
+
+    private Vector2 GetScreenShakeOffset()
+    {
+        if (_screenShakeTimer <= 0f)
+        {
+            return Vector2.Zero;
+        }
+
+        float strength = 5f * (_screenShakeTimer / 0.25f);
+
+        return new Vector2(
+            _visualRandom.NextSingle() * strength - strength / 2f,
+            _visualRandom.NextSingle() * strength - strength / 2f
         );
     }
 

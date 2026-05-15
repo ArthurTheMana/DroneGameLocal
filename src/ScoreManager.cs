@@ -25,11 +25,6 @@ public sealed class ScoreManager
         Score += points;
     }
 
-    public bool HasReachedWinScore()
-    {
-        return Score >= GameSettings.WinScore;
-    }
-
     public void SaveHighScoreIfNeeded()
     {
         if (Score <= HighScore)
