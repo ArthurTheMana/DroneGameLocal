@@ -28,8 +28,6 @@ public sealed class DifficultySettings
     public float MaxObstacleSpeed { get; init; }
     public float ScoreSpeedMultiplier { get; init; }
 
-    // LEVEL 4A CHANGE:
-    // Enemy progression settings.
     public int StartingMaxEnemies { get; init; }
     public int MaxEnemies { get; init; }
     public float SecondsToReachMaxEnemies { get; init; }
@@ -44,6 +42,12 @@ public sealed class DifficultySettings
     public float EnemyScoreSpeedMultiplier { get; init; }
 
     public int PointsPerEnemy { get; init; }
+
+    // LEVEL 4B CHANGE:
+    // Enemy shooting interval.
+    // Smaller number = enemies shoot more often.
+    public float MinEnemyShootInterval { get; init; }
+    public float MaxEnemyShootInterval { get; init; }
 
     public static DifficultySettings Get(DifficultyLevel level)
     {
@@ -82,7 +86,10 @@ public sealed class DifficultySettings
                 MaxEnemySpeed = 140f,
                 EnemyScoreSpeedMultiplier = 0.08f,
 
-                PointsPerEnemy = 25
+                PointsPerEnemy = 25,
+
+                MinEnemyShootInterval = 3.5f,
+                MaxEnemyShootInterval = 5.5f
             },
 
             DifficultyLevel.Hard => new DifficultySettings
@@ -118,7 +125,10 @@ public sealed class DifficultySettings
                 MaxEnemySpeed = 240f,
                 EnemyScoreSpeedMultiplier = 0.18f,
 
-                PointsPerEnemy = 40
+                PointsPerEnemy = 40,
+
+                MinEnemyShootInterval = 1.5f,
+                MaxEnemyShootInterval = 2.8f
             },
 
             _ => new DifficultySettings
@@ -154,7 +164,10 @@ public sealed class DifficultySettings
                 MaxEnemySpeed = 180f,
                 EnemyScoreSpeedMultiplier = 0.12f,
 
-                PointsPerEnemy = 30
+                PointsPerEnemy = 30,
+
+                MinEnemyShootInterval = 2.5f,
+                MaxEnemyShootInterval = 4.0f
             }
         };
     }

@@ -12,10 +12,15 @@ public static class GameSettings
 
     // LEVEL 4A CHANGE:
     // Charged shot settings.
-    // Player must hold J for a short time before shooting.
-    // Cooldown stops the player from spamming shots.
     public const float ShotMinChargeSeconds = 0.35f;
     public const float ShotMaxChargeSeconds = 1.50f;
     public const float ShotCooldownSeconds = 0.80f;
     public const float ShotSpeed = 650f;
+
+    // LEVEL 4B CHANGE:
+    // Enemy bullet settings.
+    // Enemy bullets move from right to left.
+    public const float EnemyBulletSpeed = 360f;
+    public const int EnemyBulletWidth = 14;
+    public const int EnemyBulletHeight = 6;
 }

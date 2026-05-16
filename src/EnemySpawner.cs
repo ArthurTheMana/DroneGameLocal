@@ -83,7 +83,7 @@ public sealed class EnemySpawner
 
         CurrentMaxEnemies =
             _settings.StartingMaxEnemies +
-            (int)MathF.Round(enemyRange * ProgressPercent);
+            (int)Math.Round(enemyRange * ProgressPercent);
 
         CurrentMaxEnemies = Math.Clamp(
             CurrentMaxEnemies,
@@ -120,11 +120,17 @@ public sealed class EnemySpawner
             baseSpeed +
             currentScore * _settings.EnemyScoreSpeedMultiplier;
 
+        float shootInterval =
+            _settings.MinEnemyShootInterval +
+            (float)_random.NextDouble() *
+            (_settings.MaxEnemyShootInterval - _settings.MinEnemyShootInterval);
+
         return new Enemy(
             GameSettings.ScreenWidth + 40,
             y,
             speed,
-            _settings.PointsPerEnemy
+            _settings.PointsPerEnemy,
+            shootInterval
         );
     }
 }

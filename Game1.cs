@@ -28,6 +28,10 @@ public sealed class Game1 : Game
     // Charged shots fired by the player.
     private readonly List<ChargeShot> _shots = new();
 
+    // LEVEL 4B CHANGE:
+    // Bullets fired by enemies.
+    private readonly List<EnemyBullet> _enemyBullets = new();
+
     private readonly GameState _gameState = new();
     private readonly InputManager _inputManager = new();
     private readonly ScoreManager _scoreManager = new();
@@ -220,13 +224,15 @@ public sealed class Game1 : Game
 
         UpdateObstacles(deltaTime);
         UpdateEnemies(deltaTime);
+
+        // LEVEL 4B CHANGE:
+        // Enemies shoot bullets after they move.
+        HandleEnemyShooting();
+
         UpdateShots(deltaTime);
+        UpdateEnemyBullets(deltaTime);
 
-        // LEVEL 4A CHANGE:
-        // Shots can destroy enemies.
-        // Strong charged shots can also destroy obstacles.
         CheckShotHits();
-
         CheckCollision();
 
         Window.Title =
@@ -250,6 +256,7 @@ public sealed class Game1 : Game
         _obstacles.Clear();
         _enemies.Clear();
         _shots.Clear();
+        _enemyBullets.Clear();
 
         _obstacleSpawner.Reset(_difficultySettings);
         _enemySpawner.Reset(_difficultySettings);
@@ -425,9 +432,43 @@ public sealed class Game1 : Game
         }
     }
 
-    // LEVEL 4A CHANGE:
-    // Charged shots can destroy enemies.
-    // A strong charged shot can also destroy one obstacle.
+    // LEVEL 4B CHANGE:
+    // Enemies fire bullets on a timer.
+    // They only shoot after they enter the visible screen.
+    private void HandleEnemyShooting()
+    {
+        foreach (Enemy enemy in _enemies)
+        {
+            if (enemy.Position.X > GameSettings.ScreenWidth - enemy.Width)
+            {
+                continue;
+            }
+
+            if (!enemy.CanShoot())
+            {
+                continue;
+            }
+
+            _enemyBullets.Add(new EnemyBullet(enemy.GetShootPosition()));
+            enemy.ResetShootTimer();
+        }
+    }
+
+    private void UpdateEnemyBullets(float deltaTime)
+    {
+        for (int i = _enemyBullets.Count - 1; i >= 0; i--)
+        {
+            EnemyBullet bullet = _enemyBullets[i];
+
+            bullet.Update(deltaTime);
+
+            if (bullet.IsOffScreen())
+            {
+                _enemyBullets.RemoveAt(i);
+            }
+        }
+    }
+
     private void CheckShotHits()
     {
         for (int shotIndex = _shots.Count - 1; shotIndex >= 0; shotIndex--)
@@ -436,6 +477,36 @@ public sealed class Game1 : Game
             Rectangle shotBox = shot.GetBounds();
 
             bool shotRemoved = false;
+
+            // LEVEL 4B CHANGE:
+            // Player shot can destroy enemy bullets.
+            for (int bulletIndex = _enemyBullets.Count - 1; bulletIndex >= 0; bulletIndex--)
+            {
+                EnemyBullet bullet = _enemyBullets[bulletIndex];
+
+                if (!shotBox.Intersects(bullet.GetBounds()))
+                {
+                    continue;
+                }
+
+                Vector2 hitPosition = new Vector2(
+                    bullet.Position.X + bullet.Width / 2f,
+                    bullet.Position.Y + bullet.Height / 2f
+                );
+
+                _particles.EmitCrash(hitPosition);
+
+                _enemyBullets.RemoveAt(bulletIndex);
+                _shots.RemoveAt(shotIndex);
+
+                shotRemoved = true;
+                break;
+            }
+
+            if (shotRemoved)
+            {
+                continue;
+            }
 
             for (int enemyIndex = _enemies.Count - 1; enemyIndex >= 0; enemyIndex--)
             {
@@ -510,6 +581,15 @@ public sealed class Game1 : Game
             }
         }
 
+        foreach (Enemy enemy in _enemies)
+        {
+            if (droneBox.Intersects(enemy.GetBounds()))
+            {
+                crashed = true;
+                break;
+            }
+        }
+
         if (!crashed)
         {
             return;
@@ -528,6 +608,7 @@ public sealed class Game1 : Game
         _obstacles.Clear();
         _enemies.Clear();
         _shots.Clear();
+        _enemyBullets.Clear();
 
         _drone.Reset(
             GameSettings.StartDroneX,
@@ -568,6 +649,7 @@ public sealed class Game1 : Game
         // LEVEL 4A CHANGE:
         // Draw enemies and shots after obstacles.
         DrawEnemies();
+        DrawEnemyBullets();
         DrawShots();
 
         _particles.Draw(_spriteBatch, _pixel);
@@ -987,6 +1069,23 @@ public sealed class Game1 : Game
             );
 
             DrawRect(core, Color.White);
+        }
+    }
+
+    private void DrawEnemyBullets()
+    {
+        foreach (EnemyBullet bullet in _enemyBullets)
+        {
+            DrawRect(bullet.GetBounds(), new Color(255, 60, 60));
+
+            var core = new Rectangle(
+                bullet.GetBounds().X + 2,
+                bullet.GetBounds().Y + 2,
+                bullet.GetBounds().Width - 4,
+                MathHelper.Max(2, bullet.GetBounds().Height - 4)
+            );
+
+            DrawRect(core, new Color(255, 214, 10));
         }
     }
 
