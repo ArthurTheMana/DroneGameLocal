@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Xna.Framework;
 
 namespace DroneGameLocal;
@@ -7,20 +6,17 @@ public sealed class ChargeShot
 {
     public Vector2 Position { get; private set; }
 
-    public float ChargeRatio { get; }
+    public int Width { get; } = 34;
+    public int Height { get; } = 12;
 
-    public int Width => 18 + (int)(ChargeRatio * 22);
-    public int Height => 8 + (int)(ChargeRatio * 10);
+    // LEVEL 4C CHANGE:
+    // In the new auto-charge system, every stored charge fires a strong shot.
+    // This keeps the system simple: 1 charge = 1 useful shot.
+    public bool CanBreakObstacle => true;
 
-    // LEVEL 4A CHANGE:
-    // Any charged shot can destroy Scout enemies.
-    // Only a strong charged shot can destroy obstacles.
-    public bool CanBreakObstacle => ChargeRatio >= 0.75f;
-
-    public ChargeShot(Vector2 position, float chargeRatio)
+    public ChargeShot(Vector2 position)
     {
         Position = position;
-        ChargeRatio = Math.Clamp(chargeRatio, 0f, 1f);
     }
 
     public void Update(float deltaTime)

@@ -53,12 +53,12 @@ public sealed class Game1 : Game
     private float _collisionCooldown;
     private float _screenShakeTimer;
 
-    // LEVEL 4A CHANGE:
-    // Charge shot state.
-    // Hold J to charge. Release J to fire.
-    private float _shotChargeTimer;
-    private float _shotCooldownTimer;
-    private bool _isChargingShot;
+    // LEVEL 4C CHANGE:
+    // Auto charge system.
+    // The game slowly builds shot charges up to 3.
+    // Press J to spend 1 charge and shoot.
+    private int _shotCharges = GameSettings.MaxShotCharges;
+    private float _shotRechargeTimer;
 
     private readonly System.Random _visualRandom = new();
 
@@ -194,15 +194,11 @@ public sealed class Game1 : Game
             return;
         }
 
-        if (_shotCooldownTimer > 0f)
-        {
-            _shotCooldownTimer -= deltaTime;
-        }
-
         HandleDroneMovement(deltaTime);
 
-        // LEVEL 4A CHANGE:
-        // Player can hold J to charge and release J to shoot.
+        // LEVEL 4C CHANGE:
+        // Charges build automatically over time.
+        // Press J to spend 1 charge and shoot.
         HandleChargeShot(deltaTime);
 
         _obstacleSpawner.Update(
@@ -212,9 +208,6 @@ public sealed class Game1 : Game
             _difficultySettings
         );
 
-        // LEVEL 4A CHANGE:
-        // Enemy spawner works like obstacle progression.
-        // More survival time means more enemies are allowed.
         _enemySpawner.Update(
             deltaTime,
             _enemies,
@@ -225,8 +218,6 @@ public sealed class Game1 : Game
         UpdateObstacles(deltaTime);
         UpdateEnemies(deltaTime);
 
-        // LEVEL 4B CHANGE:
-        // Enemies shoot bullets after they move.
         HandleEnemyShooting();
 
         UpdateShots(deltaTime);
@@ -264,9 +255,10 @@ public sealed class Game1 : Game
         _collisionCooldown = 0f;
         _screenShakeTimer = 0f;
 
-        _shotChargeTimer = 0f;
-        _shotCooldownTimer = 0f;
-        _isChargingShot = false;
+        // LEVEL 4C CHANGE:
+        // Start each run with full charges so the player has emergency shots.
+        _shotCharges = GameSettings.MaxShotCharges;
+        _shotRechargeTimer = 0f;
     }
 
     private void SetDifficulty(DifficultyLevel level)
@@ -325,59 +317,54 @@ public sealed class Game1 : Game
         );
     }
 
-    // LEVEL 4A CHANGE:
-    // Hold J to charge.
-    // Release J to fire.
-    // This prevents shooting spam because the player must charge first,
-    // and there is also a cooldown after firing.
+    // LEVEL 4C CHANGE:
+    // Charges build automatically over time.
+    // The player no longer needs to hold J.
+    // Press J to spend 1 charge and shoot.
     private void HandleChargeShot(float deltaTime)
     {
-        if (_shotCooldownTimer > 0f)
+        RechargeShot(deltaTime);
+
+        if (_inputManager.IsKeyPressed(Keys.J))
         {
-            _isChargingShot = false;
-            _shotChargeTimer = 0f;
+            TryFireChargedShot();
+        }
+    }
+
+    private void RechargeShot(float deltaTime)
+    {
+        if (_shotCharges >= GameSettings.MaxShotCharges)
+        {
+            _shotRechargeTimer = 0f;
             return;
         }
 
-        if (_inputManager.IsKeyDown(Keys.J))
-        {
-            _isChargingShot = true;
+        _shotRechargeTimer += deltaTime;
 
-            _shotChargeTimer = MathHelper.Min(
-                GameSettings.ShotMaxChargeSeconds,
-                _shotChargeTimer + deltaTime
-            );
+        if (_shotRechargeTimer < GameSettings.ShotRechargeSeconds)
+        {
+            return;
         }
 
-        if (_inputManager.IsKeyReleased(Keys.J))
-        {
-            TryFireChargedShot();
-            _isChargingShot = false;
-            _shotChargeTimer = 0f;
-        }
+        _shotRechargeTimer = 0f;
+        _shotCharges++;
     }
 
     private void TryFireChargedShot()
     {
-        if (_shotChargeTimer < GameSettings.ShotMinChargeSeconds)
+        if (_shotCharges <= 0)
         {
             return;
         }
-
-        float chargeRatio = MathHelper.Clamp(
-            _shotChargeTimer / GameSettings.ShotMaxChargeSeconds,
-            0f,
-            1f
-        );
 
         Vector2 shotPosition = new Vector2(
             _drone.Position.X + _drone.Width + 4,
             _drone.Position.Y + _drone.Height / 2f
         );
 
-        _shots.Add(new ChargeShot(shotPosition, chargeRatio));
+        _shots.Add(new ChargeShot(shotPosition));
 
-        _shotCooldownTimer = GameSettings.ShotCooldownSeconds;
+        _shotCharges--;
     }
 
     private void UpdateObstacles(float deltaTime)
@@ -947,40 +934,43 @@ public sealed class Game1 : Game
             progress: _enemySpawner.ProgressPercent
         );
 
-        float shotProgress = MathHelper.Clamp(
-            _shotChargeTimer / GameSettings.ShotMaxChargeSeconds,
-            0f,
-            1f
-        );
-
+        // LEVEL 4C CHANGE:
+        // Show stored shot charges and recharge progress.
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            "SHOT J",
+            $"SHOT {_shotCharges}/{GameSettings.MaxShotCharges}",
             new Vector2(700, 52),
             2,
             new Color(0, 217, 255)
         );
+
+        float rechargeProgress = _shotCharges >= GameSettings.MaxShotCharges
+            ? 1f
+            : MathHelper.Clamp(
+                _shotRechargeTimer / GameSettings.ShotRechargeSeconds,
+                0f,
+                1f
+            );
 
         DrawProgressBar(
             x: 700,
             y: 80,
             width: 150,
             height: 14,
-            progress: _shotCooldownTimer > 0f ? 0f : shotProgress
+            progress: rechargeProgress
         );
 
-        if (_isChargingShot)
-        {
-            PixelText.DrawText(
-                _spriteBatch!,
-                _pixel!,
-                "CHARGING",
-                new Vector2(700, 104),
-                2,
-                new Color(255, 214, 10)
-            );
-        }
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            "PRESS J TO FIRE",
+            new Vector2(700, 104),
+            2,
+            _shotCharges > 0
+                ? new Color(255, 214, 10)
+                : new Color(255, 80, 100)
+        );
     }
 
     private void DrawDrone()

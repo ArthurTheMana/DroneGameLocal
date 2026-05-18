@@ -10,16 +10,16 @@ public static class GameSettings
 
     public const float CollisionCooldownSeconds = 1.0f;
 
-    // LEVEL 4A CHANGE:
-    // Charged shot settings.
-    public const float ShotMinChargeSeconds = 0.35f;
-    public const float ShotMaxChargeSeconds = 1.50f;
-    public const float ShotCooldownSeconds = 0.80f;
+    // LEVEL 4C CHANGE:
+    // Auto charge shot system.
+    // Charges build by themselves up to MaxShotCharges.
+    // Press J to spend 1 charge and shoot.
+    public const int MaxShotCharges = 3;
+    public const float ShotRechargeSeconds = 1.20f;
     public const float ShotSpeed = 650f;
 
     // LEVEL 4B CHANGE:
     // Enemy bullet settings.
-    // Enemy bullets move from right to left.
     public const float EnemyBulletSpeed = 360f;
     public const int EnemyBulletWidth = 14;
     public const int EnemyBulletHeight = 6;
