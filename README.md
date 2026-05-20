@@ -39,3 +39,24 @@ DroneGameLocal/
 │   ├── LocalSaveManager.cs
 │   └── PixelText.cs
 └── README.md
+
+## Latest Features
+
+- Endless score mode
+- Easy, Normal, and Hard difficulty
+- Time-based obstacle progression
+- Enemy progression over time
+- Enemies can shoot bullets
+- Player has auto-recharging shots
+- Maximum 3 shot charges
+- Press J to shoot
+- Player shots can destroy enemy bullets, enemies, and obstacles
+
+| Key | Action |
+|---|---|
+| Enter / Space | Start / Restart |
+| W / A / S / D | Move |
+| Arrow Keys | Move |
+| J | Fire charged shot |
+| P | Pause / Resume |
+| Esc | Quit |
