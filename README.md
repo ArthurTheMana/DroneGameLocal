@@ -64,10 +64,10 @@ DroneGameLocal/
 ## Screenshots
 
 ### Start Screen
-![Start Screen](screenshots/start-screen.png)
+![Start Screen](screenshot/start-screen.png)
 
 ### Gameplay
-![Gameplay](screenshots/gameplay.png)
+![Gameplay](screenshot/gameplay.png)
 
 ### Game Over
-![Game Over](screenshots/game-over.png)
+![Game Over](screenshot/game-over.png)
