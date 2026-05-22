@@ -436,7 +436,21 @@ public sealed class Game1 : Game
                 continue;
             }
 
-            _enemyBullets.Add(new EnemyBullet(enemy.GetShootPosition()));
+            // LEVEL 4E POLISH:
+            // Enemy bullet speed now scales over time.
+            // We use enemy progression as the pressure value.
+            // At the start, bullets use EnemyBulletStartSpeed.
+            // Later, bullets move toward EnemyBulletMaxSpeed.
+            float bulletSpeed = MathHelper.Lerp(
+                _difficultySettings.EnemyBulletStartSpeed,
+                _difficultySettings.EnemyBulletMaxSpeed,
+                _enemySpawner.ProgressPercent
+            );
+
+            _enemyBullets.Add(new EnemyBullet(
+                enemy.GetShootPosition(),
+                bulletSpeed
+            ));
             enemy.ResetShootTimer();
         }
     }
@@ -961,10 +975,16 @@ public sealed class Game1 : Game
             progress: rechargeProgress
         );
 
+        // LEVEL 4E POLISH:
+        // When no shot charges are available, show a clearer status message.
+        string shotStatusText = _shotCharges > 0
+            ? "PRESS J TO FIRE"
+            : "RECHARGING";
+
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            "PRESS J TO FIRE",
+            shotStatusText,
             new Vector2(700, 104),
             2,
             _shotCharges > 0

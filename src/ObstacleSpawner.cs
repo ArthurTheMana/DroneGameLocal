@@ -5,6 +5,11 @@ namespace DroneGameLocal;
 
 public sealed class ObstacleSpawner
 {
+    // LEVEL 4D POLISH:
+    // These values help reduce unfair obstacle stacking.
+    private const int MinObstacleVerticalGap = 75;
+    private const int MaxSpawnAttempts = 12;
+
     private readonly Random _random = new();
 
     private float _spawnTimer;
@@ -27,6 +32,11 @@ public sealed class ObstacleSpawner
     // ProgressPercent is used by the HUD progress bar.
     // 0 = start of run, 1 = reached maximum obstacle pressure.
     public float ProgressPercent { get; private set; }
+
+    public ObstacleSpawner()
+    {
+        Reset(_settings);
+    }
 
     public void Reset(DifficultySettings settings)
     {
@@ -72,7 +82,7 @@ public sealed class ObstacleSpawner
 
         _spawnTimer = 0f;
 
-        Obstacle obstacle = CreateObstacle(currentScore);
+        Obstacle obstacle = CreateObstacle(currentScore, obstacles);
         obstacles.Add(obstacle);
     }
 
@@ -99,7 +109,7 @@ public sealed class ObstacleSpawner
 
         CurrentMaxObstacles =
             _settings.StartingMaxObstacles +
-            (int)MathF.Round(obstacleRange * ProgressPercent);
+            (int)Math.Round(obstacleRange * ProgressPercent);
 
         CurrentMaxObstacles = Math.Clamp(
             CurrentMaxObstacles,
@@ -108,6 +118,10 @@ public sealed class ObstacleSpawner
         );
     }
 
+    // LEVEL 3C CHANGE:
+    // The game gets harder over time.
+    // Every few seconds, the spawn interval becomes shorter,
+    // so obstacles appear more often.
     private void IncreaseDifficultyIfNeeded()
     {
         if (_difficultyTimer < _settings.DifficultyIncreaseEverySeconds)
@@ -123,21 +137,23 @@ public sealed class ObstacleSpawner
         );
     }
 
-    private Obstacle CreateObstacle(int currentScore)
+    private Obstacle CreateObstacle(
+        int currentScore,
+        List<Obstacle> existingObstacles)
     {
         int width = _random.Next(35, 80);
         int height = _random.Next(45, 140);
 
-        int y = _random.Next(
-            60,
-            GameSettings.ScreenHeight - height - 40
-        );
+        int y = FindFairYPosition(height, existingObstacles);
 
         float baseSpeed = _random.Next(
             (int)_settings.MinObstacleSpeed,
             (int)_settings.MaxObstacleSpeed
         );
 
+        // LEVEL 3C CHANGE:
+        // Obstacle speed increases as the player's score gets higher.
+        // This creates endless progressive difficulty.
         float speed =
             baseSpeed +
             currentScore * _settings.ScoreSpeedMultiplier;
@@ -149,5 +165,43 @@ public sealed class ObstacleSpawner
             height,
             speed
         );
+    }
+
+    // LEVEL 4D POLISH:
+    // Try to avoid spawning obstacles too close to each other vertically.
+    // This reduces unfair "wall" patterns.
+    private int FindFairYPosition(
+        int height,
+        List<Obstacle> existingObstacles)
+    {
+        int minY = 140;
+        int maxY = GameSettings.ScreenHeight - height - 40;
+
+        for (int attempt = 0; attempt < MaxSpawnAttempts; attempt++)
+        {
+            int candidateY = _random.Next(minY, maxY);
+
+            if (IsFarEnoughFromExistingObstacles(candidateY, existingObstacles))
+            {
+                return candidateY;
+            }
+        }
+
+        return _random.Next(minY, maxY);
+    }
+
+    private static bool IsFarEnoughFromExistingObstacles(
+        int candidateY,
+        List<Obstacle> existingObstacles)
+    {
+        foreach (Obstacle obstacle in existingObstacles)
+        {
+            if (Math.Abs(candidateY - obstacle.Position.Y) < MinObstacleVerticalGap)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

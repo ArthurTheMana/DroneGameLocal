@@ -9,15 +9,21 @@ public sealed class EnemyBullet
     public int Width { get; } = GameSettings.EnemyBulletWidth;
     public int Height { get; } = GameSettings.EnemyBulletHeight;
 
-    public EnemyBullet(Vector2 position)
+    // LEVEL 4E POLISH:
+    // Enemy bullet speed is no longer fixed globally.
+    // It now comes from the selected difficulty and time progression.
+    public float Speed { get; }
+
+    public EnemyBullet(Vector2 position, float speed)
     {
         Position = position;
+        Speed = speed;
     }
 
     public void Update(float deltaTime)
     {
         Position = new Vector2(
-            Position.X - GameSettings.EnemyBulletSpeed * deltaTime,
+            Position.X - Speed * deltaTime,
             Position.Y
         );
     }
