@@ -7,7 +7,6 @@ public sealed class EnemySpawner
 {
     // LEVEL 4D POLISH:
     // These values help enemies spawn in a more readable way.
-    // It avoids too many enemies stacking on the same vertical line.
     private const int MinEnemyVerticalGap = 80;
     private const int MaxSpawnAttempts = 12;
 
@@ -19,7 +18,6 @@ public sealed class EnemySpawner
 
     // LEVEL 4A CHANGE:
     // This tracks how long the player has survived.
-    // More time means more enemies are allowed.
     private float _survivalTimer;
 
     private DifficultySettings _settings =
@@ -135,6 +133,11 @@ public sealed class EnemySpawner
         int currentScore,
         List<Enemy> existingEnemies)
     {
+        EnemyType type = ChooseEnemyType();
+
+        int width = GetEnemyWidth(type);
+        int height = GetEnemyHeight(type);
+
         int y = FindFairYPosition(existingEnemies);
 
         float baseSpeed = _random.Next(
@@ -142,11 +145,26 @@ public sealed class EnemySpawner
             (int)_settings.MaxEnemySpeed
         );
 
-        // LEVEL 4A CHANGE:
-        // Enemy speed increases as score becomes higher.
         float speed =
             baseSpeed +
             currentScore * _settings.EnemyScoreSpeedMultiplier;
+
+        // LEVEL 5A CHANGE:
+        // Each enemy type adjusts base speed.
+        // Tank is slower.
+        // ZigZag is faster.
+        // Sniper is slower because its bullets are the real threat.
+        speed *= type switch
+        {
+            EnemyType.Tank => 0.72f,
+
+            // LEVEL 5A POLISH:
+            // ZigZag is faster so its movement pattern feels more obvious.
+            EnemyType.ZigZag => 1.32f,
+
+            EnemyType.Sniper => 0.82f,
+            _ => 1.0f
+        };
 
         // LEVEL 4B CHANGE:
         // Each enemy gets a random shoot interval based on difficulty.
@@ -155,18 +173,132 @@ public sealed class EnemySpawner
             (float)_random.NextDouble() *
             (_settings.MaxEnemyShootInterval - _settings.MinEnemyShootInterval);
 
+        // LEVEL 5A CHANGE:
+        // Tank deploys shield slower.
+        // ZigZag shoots slightly faster.
+        // Sniper shoots less often, but its bullets fly faster.
+        shootInterval *= type switch
+        {
+            EnemyType.Tank => 1.45f,
+            EnemyType.ZigZag => 0.88f,
+            EnemyType.Sniper => 1.30f,
+            _ => 1.0f
+        };
+
         return new Enemy(
+            type,
             GameSettings.ScreenWidth + 40,
             y,
+            width,
+            height,
             speed,
-            _settings.PointsPerEnemy,
+            GetScoreReward(type),
+            GetHealth(type),
             shootInterval
         );
     }
 
+    // LEVEL 5A CHANGE:
+    // Enemy type selection.
+    // Early game = mostly Scout.
+    // Mid game = Tank and ZigZag can appear.
+    // Late game = Sniper can appear too.
+    private EnemyType ChooseEnemyType()
+    {
+        int roll = _random.Next(100);
+
+        if (ProgressPercent < 0.25f)
+        {
+            return EnemyType.Scout;
+        }
+
+        if (ProgressPercent < 0.50f)
+        {
+            if (roll < 16)
+            {
+                return EnemyType.Tank;
+            }
+
+            return EnemyType.Scout;
+        }
+
+        if (ProgressPercent < 0.75f)
+        {
+            if (roll < 16)
+            {
+                return EnemyType.Tank;
+            }
+
+            if (roll < 36)
+            {
+                return EnemyType.ZigZag;
+            }
+
+            return EnemyType.Scout;
+        }
+
+        if (roll < 16)
+        {
+            return EnemyType.Tank;
+        }
+
+        if (roll < 36)
+        {
+            return EnemyType.ZigZag;
+        }
+
+        if (roll < 50)
+        {
+            return EnemyType.Sniper;
+        }
+
+        return EnemyType.Scout;
+    }
+
+    private static int GetEnemyWidth(EnemyType type)
+    {
+        return type switch
+        {
+            EnemyType.Tank => 58,
+            EnemyType.ZigZag => 32,
+            EnemyType.Sniper => 42,
+            _ => 36
+        };
+    }
+
+    private static int GetEnemyHeight(EnemyType type)
+    {
+        return type switch
+        {
+            EnemyType.Tank => 44,
+            EnemyType.ZigZag => 30,
+            EnemyType.Sniper => 38,
+            _ => 36
+        };
+    }
+
+    private static int GetHealth(EnemyType type)
+    {
+        return type switch
+        {
+            EnemyType.Tank => 2,
+            _ => 1
+        };
+    }
+
+    private int GetScoreReward(EnemyType type)
+    {
+        return type switch
+        {
+            EnemyType.Tank => _settings.PointsPerEnemy + 25,
+            EnemyType.ZigZag => _settings.PointsPerEnemy + 15,
+            EnemyType.Sniper => _settings.PointsPerEnemy + 20,
+            _ => _settings.PointsPerEnemy
+        };
+    }
+
     // LEVEL 4D POLISH:
     // Avoid spawning enemies too close to each other.
-    // This keeps enemy bullets more readable and fair.
     private int FindFairYPosition(List<Enemy> existingEnemies)
     {
         int minY = 150;

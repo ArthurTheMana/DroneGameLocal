@@ -32,6 +32,11 @@ public sealed class Game1 : Game
     // Bullets fired by enemies.
     private readonly List<EnemyBullet> _enemyBullets = new();
 
+    // LEVEL 5A CHANGE:
+    // Temporary shields created by Tank enemies.
+    // Shields dissolve after a few seconds and block player shots.
+    private readonly List<EnergyShield> _shields = new();
+
     private readonly GameState _gameState = new();
     private readonly InputManager _inputManager = new();
     private readonly ScoreManager _scoreManager = new();
@@ -220,6 +225,7 @@ public sealed class Game1 : Game
 
         HandleEnemyShooting();
 
+        UpdateShields(deltaTime);
         UpdateShots(deltaTime);
         UpdateEnemyBullets(deltaTime);
 
@@ -248,6 +254,7 @@ public sealed class Game1 : Game
         _enemies.Clear();
         _shots.Clear();
         _enemyBullets.Clear();
+        _shields.Clear();
 
         _obstacleSpawner.Reset(_difficultySettings);
         _enemySpawner.Reset(_difficultySettings);
@@ -419,9 +426,32 @@ public sealed class Game1 : Game
         }
     }
 
+    // LEVEL 5A CHANGE:
+    // Update Tank shields and remove them when they dissolve,
+    // get destroyed, or leave the screen.
+    private void UpdateShields(float deltaTime)
+    {
+        for (int i = _shields.Count - 1; i >= 0; i--)
+        {
+            EnergyShield shield = _shields[i];
+
+            shield.Update(deltaTime);
+
+            if (shield.IsExpired())
+            {
+                _shields.RemoveAt(i);
+            }
+        }
+    }
+
     // LEVEL 4B CHANGE:
     // Enemies fire bullets on a timer.
     // They only shoot after they enter the visible screen.
+    //
+    // LEVEL 5A CHANGE:
+    // Tank enemies no longer shoot bullets.
+    // Instead, Tank deploys temporary shields.
+    // Sniper shoots less often, but its bullets are faster.
     private void HandleEnemyShooting()
     {
         foreach (Enemy enemy in _enemies)
@@ -436,23 +466,65 @@ public sealed class Game1 : Game
                 continue;
             }
 
-            // LEVEL 4E POLISH:
-            // Enemy bullet speed now scales over time.
-            // We use enemy progression as the pressure value.
-            // At the start, bullets use EnemyBulletStartSpeed.
-            // Later, bullets move toward EnemyBulletMaxSpeed.
+            if (enemy.Type == EnemyType.Tank)
+            {
+                TryDeployTankShield(enemy);
+                enemy.ResetShootTimer();
+                continue;
+            }
+
             float bulletSpeed = MathHelper.Lerp(
                 _difficultySettings.EnemyBulletStartSpeed,
                 _difficultySettings.EnemyBulletMaxSpeed,
                 _enemySpawner.ProgressPercent
             );
 
+            // LEVEL 5A CHANGE:
+            // Enemy type can modify bullet speed.
+            // Sniper bullets are faster.
+            bulletSpeed *= enemy.GetBulletSpeedMultiplier();
+
             _enemyBullets.Add(new EnemyBullet(
                 enemy.GetShootPosition(),
                 bulletSpeed
             ));
+
             enemy.ResetShootTimer();
         }
+    }
+
+    // LEVEL 5A CHANGE:
+    // Tank creates a temporary shield in front of itself.
+    // The shield blocks player shots and dissolves after a short time.
+    private void TryDeployTankShield(Enemy tank)
+    {
+        if (_shields.Count >= GameSettings.MaxActiveTankShields)
+        {
+            return;
+        }
+
+        float shieldX =
+            tank.Position.X -
+            GameSettings.TankShieldWidth -
+            8;
+
+        float shieldY =
+            tank.Position.Y +
+            tank.Height / 2f -
+            GameSettings.TankShieldHeight / 2f;
+
+        shieldY = MathHelper.Clamp(
+            shieldY,
+            135f,
+            GameSettings.ScreenHeight - GameSettings.TankShieldHeight - 20f
+        );
+
+        float shieldSpeed = tank.Speed * 0.80f;
+
+        _shields.Add(new EnergyShield(
+            new Vector2(shieldX, shieldY),
+            shieldSpeed
+        ));
     }
 
     private void UpdateEnemyBullets(float deltaTime)
@@ -509,6 +581,43 @@ public sealed class Game1 : Game
                 continue;
             }
 
+            // LEVEL 5A CHANGE:
+            // Tank shields block player shots.
+            // A shield can be destroyed after enough hits,
+            // or it will dissolve naturally over time.
+            for (int shieldIndex = _shields.Count - 1; shieldIndex >= 0; shieldIndex--)
+            {
+                EnergyShield shield = _shields[shieldIndex];
+
+                if (!shotBox.Intersects(shield.GetBounds()))
+                {
+                    continue;
+                }
+
+                Vector2 hitPosition = new Vector2(
+                    shield.Position.X + shield.Width / 2f,
+                    shield.Position.Y + shield.Height / 2f
+                );
+
+                shield.TakeDamage(1);
+                _particles.EmitCrash(hitPosition);
+
+                if (shield.IsDestroyed())
+                {
+                    _shields.RemoveAt(shieldIndex);
+                }
+
+                _shots.RemoveAt(shotIndex);
+
+                shotRemoved = true;
+                break;
+            }
+
+            if (shotRemoved)
+            {
+                continue;
+            }
+
             for (int enemyIndex = _enemies.Count - 1; enemyIndex >= 0; enemyIndex--)
             {
                 Enemy enemy = _enemies[enemyIndex];
@@ -523,10 +632,20 @@ public sealed class Game1 : Game
                     enemy.Position.Y + enemy.Height / 2f
                 );
 
-                _particles.EmitCrash(hitPosition);
-                _scoreManager.AddScore(enemy.ScoreReward);
+                // LEVEL 5A CHANGE:
+                // Shots now damage enemies instead of always destroying them instantly.
+                // Scout, ZigZag, and Sniper die in 1 hit.
+                // Tank needs 2 hits.
+                enemy.TakeDamage(1);
 
-                _enemies.RemoveAt(enemyIndex);
+                _particles.EmitCrash(hitPosition);
+
+                if (enemy.IsDestroyed())
+                {
+                    _scoreManager.AddScore(enemy.ScoreReward);
+                    _enemies.RemoveAt(enemyIndex);
+                }
+
                 _shots.RemoveAt(shotIndex);
 
                 shotRemoved = true;
@@ -610,6 +729,7 @@ public sealed class Game1 : Game
         _enemies.Clear();
         _shots.Clear();
         _enemyBullets.Clear();
+        _shields.Clear();
 
         _drone.Reset(
             GameSettings.StartDroneX,
@@ -621,6 +741,18 @@ public sealed class Game1 : Game
         if (_gameState.Current == GameStateType.Fail)
         {
             _scoreManager.SaveHighScoreIfNeeded();
+        }
+
+        // LEVEL 5A CHANGE:
+        // Tank shields also act like temporary hazards.
+        // Touching a shield costs one life.
+        foreach (EnergyShield shield in _shields)
+        {
+            if (droneBox.Intersects(shield.GetBounds()))
+            {
+                crashed = true;
+                break;
+            }
         }
     }
 
@@ -652,6 +784,8 @@ public sealed class Game1 : Game
         DrawEnemies();
         DrawEnemyBullets();
         DrawShots();
+
+        DrawShields();
 
         _particles.Draw(_spriteBatch, _pixel);
 
@@ -1041,7 +1175,26 @@ public sealed class Game1 : Game
         {
             Rectangle body = enemy.GetBounds();
 
-            DrawRect(body, new Color(255, 140, 40));
+            Color bodyColor = enemy.Type switch
+            {
+                EnemyType.Tank => new Color(150, 70, 220),
+                EnemyType.ZigZag => new Color(255, 210, 70),
+
+                // LEVEL 5A POLISH:
+                // Sniper is green so it does not look like red obstacles.
+                EnemyType.Sniper => new Color(80, 230, 120),
+
+                _ => new Color(255, 140, 40)
+            };
+
+            // LEVEL 5A CHANGE:
+            // Damaged Tank becomes darker so the player can see it was hit.
+            if (enemy.Type == EnemyType.Tank && enemy.Health < enemy.MaxHealth)
+            {
+                bodyColor = new Color(95, 35, 145);
+            }
+
+            DrawRect(body, bodyColor);
 
             var inner = new Rectangle(
                 body.X + 5,
@@ -1050,7 +1203,7 @@ public sealed class Game1 : Game
                 body.Height - 10
             );
 
-            DrawRect(inner, new Color(100, 45, 10));
+            DrawRect(inner, new Color(55, 35, 35));
 
             var eye = new Rectangle(
                 body.X + body.Width - 11,
@@ -1060,7 +1213,108 @@ public sealed class Game1 : Game
             );
 
             DrawRect(eye, Color.White);
+
+            if (enemy.Type == EnemyType.Tank)
+            {
+                DrawTankHealthMarks(enemy);
+            }
+
+            if (enemy.Type == EnemyType.Sniper)
+            {
+                DrawSniperMark(enemy);
+            }
         }
+    }
+
+    // LEVEL 5A CHANGE:
+    // Draw temporary Tank shields.
+    // The shield becomes more transparent as it dissolves.
+    private void DrawShields()
+    {
+        foreach (EnergyShield shield in _shields)
+        {
+            Rectangle body = shield.GetBounds();
+
+            int alpha = (int)(80 + 140 * shield.LifePercent);
+
+            DrawRect(
+                body,
+                new Color(80, 180, 255, alpha)
+            );
+
+            var inner = new Rectangle(
+                body.X + 5,
+                body.Y + 5,
+                body.Width - 10,
+                body.Height - 10
+            );
+
+            DrawRect(
+                inner,
+                new Color(20, 80, 140, alpha)
+            );
+
+            for (int i = 0; i < shield.MaxHealth; i++)
+            {
+                Color markColor = i < shield.Health
+                    ? new Color(255, 255, 255, alpha)
+                    : new Color(40, 40, 40, alpha);
+
+                var mark = new Rectangle(
+                    body.X + 5,
+                    body.Y + 8 + i * 12,
+                    body.Width - 10,
+                    5
+                );
+
+                DrawRect(mark, markColor);
+            }
+        }
+    }
+
+    // LEVEL 5A CHANGE:
+    // Simple visual HP marks for Tank.
+    private void DrawTankHealthMarks(Enemy enemy)
+    {
+        for (int i = 0; i < enemy.MaxHealth; i++)
+        {
+            Color markColor = i < enemy.Health
+                ? new Color(255, 214, 10)
+                : new Color(60, 60, 60);
+
+            var mark = new Rectangle(
+                (int)enemy.Position.X + 6 + i * 10,
+                (int)enemy.Position.Y - 8,
+                7,
+                5
+            );
+
+            DrawRect(mark, markColor);
+        }
+    }
+
+    // LEVEL 5A CHANGE:
+    // Simple visual mark for Sniper enemy.
+    // It looks like a small targeting line.
+    private void DrawSniperMark(Enemy enemy)
+    {
+        var scopeLine = new Rectangle(
+            (int)enemy.Position.X + 6,
+            (int)enemy.Position.Y + enemy.Height / 2,
+            enemy.Width - 12,
+            3
+        );
+
+        DrawRect(scopeLine, Color.White);
+
+        var scopeDot = new Rectangle(
+            (int)enemy.Position.X + enemy.Width / 2 - 2,
+            (int)enemy.Position.Y + enemy.Height / 2 - 2,
+            5,
+            5
+        );
+
+        DrawRect(scopeDot, new Color(20, 80, 35));
     }
 
     private void DrawShots()

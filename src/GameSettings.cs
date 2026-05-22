@@ -24,12 +24,17 @@ public static class GameSettings
 
     // LEVEL 4B CHANGE:
     // Enemy bullet settings.
-    // Enemy bullets move from right to left.
+    // Bullet speed comes from DifficultySettings because Easy / Normal / Hard should feel different.
     public const int EnemyBulletWidth = 14;
     public const int EnemyBulletHeight = 6;
 
-    // LEVEL 4D POLISH:
-    // Enemy bullets are slower than before.
-    // This gives the player a fair chance to dodge.
-    public const float EnemyBulletSpeed = 310f;
+    // LEVEL 5A CHANGE:
+    // Tank shield settings.
+    // Tank creates temporary shields instead of shooting bullets.
+    // Shields dissolve after a few seconds.
+    public const int TankShieldWidth = 30;
+    public const int TankShieldHeight = 72;
+    public const int TankShieldHealth = 2;
+    public const int MaxActiveTankShields = 4;
+    public const float TankShieldLifetimeSeconds = 4.0f;
 }
