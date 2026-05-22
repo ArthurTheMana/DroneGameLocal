@@ -202,11 +202,15 @@ public sealed class EnemySpawner
     // Enemy type selection.
     // Early game = mostly Scout.
     // Mid game = Tank and ZigZag can appear.
-    // Late game = Sniper can appear too.
+    // Later game = Sniper can appear too.
+    //
+    // LEVEL 5A POLISH:
+    // Sniper now starts appearing from 50% enemy pressure,
+    // because its ambush behavior should be visible during normal gameplay.
     private EnemyType ChooseEnemyType()
     {
         int roll = _random.Next(100);
-
+    
         if (ProgressPercent < 0.25f)
         {
             return EnemyType.Scout;
@@ -214,9 +218,14 @@ public sealed class EnemySpawner
 
         if (ProgressPercent < 0.50f)
         {
-            if (roll < 16)
+            if (roll < 18)
             {
                 return EnemyType.Tank;
+            }
+
+            if (roll < 32)
+            {
+                return EnemyType.ZigZag;
             }
 
             return EnemyType.Scout;
@@ -229,25 +238,30 @@ public sealed class EnemySpawner
                 return EnemyType.Tank;
             }
 
-            if (roll < 36)
+            if (roll < 38)
             {
                 return EnemyType.ZigZag;
+            }
+
+            if (roll < 50)
+            {
+                return EnemyType.Sniper;
             }
 
             return EnemyType.Scout;
         }
 
-        if (roll < 16)
+        if (roll < 18)
         {
             return EnemyType.Tank;
         }
 
-        if (roll < 36)
+        if (roll < 42)
         {
             return EnemyType.ZigZag;
         }
 
-        if (roll < 50)
+        if (roll < 62)
         {
             return EnemyType.Sniper;
         }

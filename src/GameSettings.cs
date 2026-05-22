@@ -37,4 +37,11 @@ public static class GameSettings
     public const int TankShieldHealth = 2;
     public const int MaxActiveTankShields = 4;
     public const float TankShieldLifetimeSeconds = 4.0f;
+
+    // LEVEL 5A POLISH:
+    // Sniper ambush behavior.
+    // Sniper enters the screen, aims briefly, fires once, then retreats.
+    public const float SniperStopXOffset = 260f;
+    public const float SniperAimSeconds = 0.85f;
+    public const float SniperRetreatSpeedMultiplier = 1.55f;
 }
