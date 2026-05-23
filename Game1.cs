@@ -17,6 +17,16 @@ public sealed class Game1 : Game
         GameSettings.StartDroneY
     );
 
+    // ML-1 CHANGE:
+    // Logger for collecting gameplay training data.
+    // This is the first real step before training an ML model.
+    private readonly GameplayDataLogger _gameplayDataLogger = new();
+
+    // ML-1 CHANGE:
+    // Tracks how long the current run has lasted.
+    // This becomes one of the ML model features.
+    private float _survivalSeconds;
+
     private readonly List<Obstacle> _obstacles = new();
 
     // LEVEL 4A CHANGE:
@@ -192,6 +202,10 @@ public sealed class Game1 : Game
     {
         float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
+        // ML-1 CHANGE:
+        // Track survival time as gameplay data.
+        _survivalSeconds += deltaTime;
+
         if (_collisionCooldown > 0f)
         {
             _collisionCooldown -= deltaTime;
@@ -205,6 +219,11 @@ public sealed class Game1 : Game
         // Charges build automatically over time.
         // Press J to spend 1 charge and shoot.
         HandleChargeShot(deltaTime);
+
+        // ML-1 CHANGE:
+        // Press F1/F2/F3 during gameplay to label the current game state.
+        // These labels become training data for the future ML model.
+        HandleMlLabelInput();
 
         _obstacleSpawner.Update(
             deltaTime,
@@ -241,6 +260,10 @@ public sealed class Game1 : Game
 
     private void StartNewGame()
     {
+        // ML-1 CHANGE:
+        // Reset survival timer for the new run.
+        _survivalSeconds = 0f;
+
         _gameState.StartGame(_difficultySettings.StartingLives);
 
         _scoreManager.ResetScore();
@@ -1405,5 +1428,64 @@ public sealed class Game1 : Game
     private void DrawRect(Rectangle rectangle, Color color)
     {
         _spriteBatch!.Draw(_pixel!, rectangle, color);
+    }
+
+    // ML-1 CHANGE:
+    // Manual labeling for supervised learning.
+    // F1 = Too Easy
+    // F2 = Balanced
+    // F3 = Too Hard
+    private void HandleMlLabelInput()
+    {
+        if (_inputManager.IsKeyPressed(Keys.F1))
+        {
+            LogMlSample(GameBalanceLabel.TooEasy);
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.F2))
+        {
+            LogMlSample(GameBalanceLabel.Balanced);
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.F3))
+        {
+            LogMlSample(GameBalanceLabel.TooHard);
+        }
+    }
+
+    // ML-1 CHANGE:
+    // Captures the current game state as one training sample.
+    // Later, ML.NET can learn patterns from these samples.
+    private void LogMlSample(GameBalanceLabel label)
+    {
+        var sample = new GameplaySample
+        {
+            SurvivalSeconds = _survivalSeconds,
+            Score = _scoreManager.Score,
+            Lives = _gameState.Lives,
+
+            ActiveObstacles = _obstacles.Count,
+            CurrentMaxObstacles = _obstacleSpawner.CurrentMaxObstacles,
+            ObstaclePressure = _obstacleSpawner.ProgressPercent,
+
+            ActiveEnemies = _enemies.Count,
+            CurrentMaxEnemies = _enemySpawner.CurrentMaxEnemies,
+            EnemyPressure = _enemySpawner.ProgressPercent,
+
+            ActiveEnemyBullets = _enemyBullets.Count,
+            ActivePlayerShots = _shots.Count,
+            ShotCharges = _shotCharges,
+
+            // If your current Game1.cs does not have _shields yet,
+            // replace this with ActiveShields = 0.
+            ActiveShields = _shields.Count,
+
+            Difficulty = _difficultySettings.Name,
+            Label = label.ToString()
+        };
+
+        _gameplayDataLogger.Log(sample);
+
+        Window.Title = $"ML sample saved: {label}";
     }
 }

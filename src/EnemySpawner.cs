@@ -210,7 +210,7 @@ public sealed class EnemySpawner
     private EnemyType ChooseEnemyType()
     {
         int roll = _random.Next(100);
-    
+
         if (ProgressPercent < 0.25f)
         {
             return EnemyType.Scout;
