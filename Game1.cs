@@ -68,6 +68,27 @@ public sealed class Game1 : Game
     private float _collisionCooldown;
     private float _screenShakeTimer;
 
+    // ML-1 CHANGE:
+    // After Game Over, the player can give feedback once.
+    // This prevents duplicate feedback rows for the same run.
+    private bool _hasSavedMlFeedback;
+
+    // ML-1 CHANGE:
+    // These fields store the latest gameplay state before Game Over.
+    // This is useful because enemies/bullets may be cleared after collision.
+    private int _lastActiveObstacles;
+    private int _lastCurrentMaxObstacles;
+    private float _lastObstaclePressure;
+
+    private int _lastActiveEnemies;
+    private int _lastCurrentMaxEnemies;
+    private float _lastEnemyPressure;
+
+    private int _lastActiveEnemyBullets;
+    private int _lastActivePlayerShots;
+    private int _lastShotCharges;
+    private int _lastActiveShields;
+
     // LEVEL 4C CHANGE:
     // Auto charge system.
     // The game slowly builds shot charges up to 3.
@@ -189,6 +210,10 @@ public sealed class Game1 : Game
 
     private void UpdateGameOverState(GameTime gameTime)
     {
+        // ML-1 CHANGE:
+        // After Game Over, ask the player to label the whole run.
+        HandleGameOverFeedback();
+
         if (_inputManager.IsKeyPressed(Keys.Enter) ||
             _inputManager.IsKeyPressed(Keys.Space))
         {
@@ -220,11 +245,6 @@ public sealed class Game1 : Game
         // Press J to spend 1 charge and shoot.
         HandleChargeShot(deltaTime);
 
-        // ML-1 CHANGE:
-        // Press F1/F2/F3 during gameplay to label the current game state.
-        // These labels become training data for the future ML model.
-        HandleMlLabelInput();
-
         _obstacleSpawner.Update(
             deltaTime,
             _obstacles,
@@ -249,6 +269,11 @@ public sealed class Game1 : Game
         UpdateEnemyBullets(deltaTime);
 
         CheckShotHits();
+
+        // ML-1 CHANGE:
+        // Capture the latest gameplay state before collision may clear objects.
+        CaptureGameplaySnapshot();
+
         CheckCollision();
 
         Window.Title =
@@ -263,6 +288,10 @@ public sealed class Game1 : Game
         // ML-1 CHANGE:
         // Reset survival timer for the new run.
         _survivalSeconds = 0f;
+
+        // ML-1 CHANGE:
+        // Reset feedback flag for the new run.
+        _hasSavedMlFeedback = false;
 
         _gameState.StartGame(_difficultySettings.StartingLives);
 
@@ -945,10 +974,47 @@ public sealed class Game1 : Game
                 _pixel!,
                 "GAME OVER",
                 GameSettings.ScreenWidth,
-                205,
+                185,
                 5,
                 Color.White
             );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                $"SCORE {_scoreManager.Score}",
+                GameSettings.ScreenWidth,
+                255,
+                3,
+                new Color(255, 214, 10)
+            );
+
+            string feedbackText = _hasSavedMlFeedback
+                ? "FEEDBACK SAVED THANK YOU"
+                : "F1 TOO EASY  F2 OK  F3 TOO HARD";
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                feedbackText,
+                GameSettings.ScreenWidth,
+                310,
+                2,
+                _hasSavedMlFeedback
+                    ? new Color(0, 217, 255)
+                    : Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PRESS ENTER TO RESTART",
+                GameSettings.ScreenWidth,
+                355,
+                3,
+                new Color(0, 217, 255)
+            );
+        }
 
             PixelText.DrawCenteredText(
                 _spriteBatch!,
@@ -1487,5 +1553,88 @@ public sealed class Game1 : Game
         _gameplayDataLogger.Log(sample);
 
         Window.Title = $"ML sample saved: {label}";
+    }
+
+    // ML-1 CHANGE:
+    // Stores the latest gameplay state.
+    // This snapshot is used when the player gives Game Over feedback.
+    private void CaptureGameplaySnapshot()
+    {
+        _lastActiveObstacles = _obstacles.Count;
+        _lastCurrentMaxObstacles = _obstacleSpawner.CurrentMaxObstacles;
+        _lastObstaclePressure = _obstacleSpawner.ProgressPercent;
+
+        _lastActiveEnemies = _enemies.Count;
+        _lastCurrentMaxEnemies = _enemySpawner.CurrentMaxEnemies;
+        _lastEnemyPressure = _enemySpawner.ProgressPercent;
+
+        _lastActiveEnemyBullets = _enemyBullets.Count;
+        _lastActivePlayerShots = _shots.Count;
+        _lastShotCharges = _shotCharges;
+        _lastActiveShields = _shields.Count;
+    }
+
+    // ML-1 CHANGE:
+    // Game Over feedback for supervised learning.
+    // F1 = Too Easy
+    // F2 = Balanced
+    // F3 = Too Hard
+    private void HandleGameOverFeedback()
+    {
+        if (_hasSavedMlFeedback)
+        {
+            return;
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.F1))
+        {
+            LogMlSample(GameBalanceLabel.TooEasy);
+            _hasSavedMlFeedback = true;
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.F2))
+        {
+            LogMlSample(GameBalanceLabel.Balanced);
+            _hasSavedMlFeedback = true;
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.F3))
+        {
+            LogMlSample(GameBalanceLabel.TooHard);
+            _hasSavedMlFeedback = true;
+        }
+    }
+
+    // ML-1 CHANGE:
+    // Saves one run-level feedback row into CSV after Game Over.
+    // This is better than logging during gameplay because the label describes the whole run.
+    private void LogMlSample(GameBalanceLabel label)
+    {
+        var sample = new GameplaySample
+        {
+            SurvivalSeconds = _survivalSeconds,
+            Score = _scoreManager.Score,
+            Lives = _gameState.Lives,
+
+            ActiveObstacles = _lastActiveObstacles,
+            CurrentMaxObstacles = _lastCurrentMaxObstacles,
+            ObstaclePressure = _lastObstaclePressure,
+
+            ActiveEnemies = _lastActiveEnemies,
+            CurrentMaxEnemies = _lastCurrentMaxEnemies,
+            EnemyPressure = _lastEnemyPressure,
+
+            ActiveEnemyBullets = _lastActiveEnemyBullets,
+            ActivePlayerShots = _lastActivePlayerShots,
+            ShotCharges = _lastShotCharges,
+            ActiveShields = _lastActiveShields,
+
+            Difficulty = _difficultySettings.Name,
+            Label = label.ToString()
+        };
+
+        _gameplayDataLogger.Log(sample);
+
+        Window.Title = $"ML feedback saved: {label}";
     }
 }
