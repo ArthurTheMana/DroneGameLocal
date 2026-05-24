@@ -947,7 +947,7 @@ public sealed class Game1 : Game
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
-                "HOLD J RELEASE TO SHOOT",
+                "CHARGES AUTO BUILD PRESS J",
                 GameSettings.ScreenWidth,
                 380,
                 2,
@@ -1011,27 +1011,6 @@ public sealed class Game1 : Game
                 "PRESS ENTER TO RESTART",
                 GameSettings.ScreenWidth,
                 355,
-                3,
-                new Color(0, 217, 255)
-            );
-        }
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                $"SCORE {_scoreManager.Score}",
-                GameSettings.ScreenWidth,
-                275,
-                3,
-                new Color(255, 214, 10)
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "PRESS ENTER TO RESTART",
-                GameSettings.ScreenWidth,
-                325,
                 3,
                 new Color(0, 217, 255)
             );
@@ -1494,65 +1473,6 @@ public sealed class Game1 : Game
     private void DrawRect(Rectangle rectangle, Color color)
     {
         _spriteBatch!.Draw(_pixel!, rectangle, color);
-    }
-
-    // ML-1 CHANGE:
-    // Manual labeling for supervised learning.
-    // F1 = Too Easy
-    // F2 = Balanced
-    // F3 = Too Hard
-    private void HandleMlLabelInput()
-    {
-        if (_inputManager.IsKeyPressed(Keys.F1))
-        {
-            LogMlSample(GameBalanceLabel.TooEasy);
-        }
-
-        if (_inputManager.IsKeyPressed(Keys.F2))
-        {
-            LogMlSample(GameBalanceLabel.Balanced);
-        }
-
-        if (_inputManager.IsKeyPressed(Keys.F3))
-        {
-            LogMlSample(GameBalanceLabel.TooHard);
-        }
-    }
-
-    // ML-1 CHANGE:
-    // Captures the current game state as one training sample.
-    // Later, ML.NET can learn patterns from these samples.
-    private void LogMlSample(GameBalanceLabel label)
-    {
-        var sample = new GameplaySample
-        {
-            SurvivalSeconds = _survivalSeconds,
-            Score = _scoreManager.Score,
-            Lives = _gameState.Lives,
-
-            ActiveObstacles = _obstacles.Count,
-            CurrentMaxObstacles = _obstacleSpawner.CurrentMaxObstacles,
-            ObstaclePressure = _obstacleSpawner.ProgressPercent,
-
-            ActiveEnemies = _enemies.Count,
-            CurrentMaxEnemies = _enemySpawner.CurrentMaxEnemies,
-            EnemyPressure = _enemySpawner.ProgressPercent,
-
-            ActiveEnemyBullets = _enemyBullets.Count,
-            ActivePlayerShots = _shots.Count,
-            ShotCharges = _shotCharges,
-
-            // If your current Game1.cs does not have _shields yet,
-            // replace this with ActiveShields = 0.
-            ActiveShields = _shields.Count,
-
-            Difficulty = _difficultySettings.Name,
-            Label = label.ToString()
-        };
-
-        _gameplayDataLogger.Log(sample);
-
-        Window.Title = $"ML sample saved: {label}";
     }
 
     // ML-1 CHANGE:
