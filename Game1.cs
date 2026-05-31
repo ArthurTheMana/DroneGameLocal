@@ -51,6 +51,13 @@ public sealed class Game1 : Game
     private readonly InputManager _inputManager = new();
     private readonly ScoreManager _scoreManager = new();
 
+    // ML-2 CHANGE:
+    // Rule-based bot used to collect gameplay data faster.
+    // This bot is not ML. It is an autoplayer helper.
+    private readonly BotPlayer _botPlayer = new();
+
+    private bool _isBotEnabled;
+
     private readonly ObstacleSpawner _obstacleSpawner = new();
 
     // LEVEL 4A CHANGE:
@@ -140,6 +147,13 @@ public sealed class Game1 : Game
         if (_inputManager.IsKeyPressed(Keys.Escape))
         {
             Exit();
+        }
+
+        // ML-2 CHANGE:
+        // Press B to turn the rule-based bot on or off.
+        if (_inputManager.IsKeyPressed(Keys.B))
+        {
+            _isBotEnabled = !_isBotEnabled;
         }
 
         if (_gameState.Current == GameStateType.Start)
@@ -238,12 +252,15 @@ public sealed class Game1 : Game
             return;
         }
 
-        HandleDroneMovement(deltaTime);
-
         // LEVEL 4C CHANGE:
-        // Charges build automatically over time.
-        // Press J to spend 1 charge and shoot.
+        // Shots recharge automatically.
+        // Manual shooting only happens when bot is OFF.
         HandleChargeShot(deltaTime);
+
+        // ML-2 CHANGE:
+        // If bot is ON, bot controls movement and shooting.
+        // If bot is OFF, player controls movement normally.
+        HandlePlayerOrBotControl(deltaTime);
 
         _obstacleSpawner.Update(
             deltaTime,
@@ -376,13 +393,57 @@ public sealed class Game1 : Game
         );
     }
 
+    // ML-2 CHANGE:
+    // Chooses between human control and bot control.
+    // Human mode uses keyboard.
+    // Bot mode uses rule-based decisions.
+    private void HandlePlayerOrBotControl(float deltaTime)
+    {
+        if (!_isBotEnabled)
+        {
+            HandleDroneMovement(deltaTime);
+            return;
+        }
+
+        BotDecision decision = _botPlayer.GetDecision(
+            _drone,
+            _obstacles,
+            _enemies,
+            _enemyBullets,
+            _shields,
+            _shotCharges,
+            _shots.Count
+        );
+
+        _drone.Move(decision.MovementDirection, deltaTime);
+
+        _drone.ClampToScreen(
+            GameSettings.ScreenWidth,
+            GameSettings.ScreenHeight
+        );
+
+        if (decision.ShouldFire)
+        {
+            TryFireChargedShot();
+        }
+    }
+
     // LEVEL 4C CHANGE:
     // Charges build automatically over time.
     // The player no longer needs to hold J.
     // Press J to spend 1 charge and shoot.
+    //
+    // ML-2 CHANGE:
+    // If bot is enabled, manual J shooting is disabled.
+    // Bot will call TryFireChargedShot() by itself.
     private void HandleChargeShot(float deltaTime)
     {
         RechargeShot(deltaTime);
+
+        if (_isBotEnabled)
+        {
+            return;
+        }
 
         if (_inputManager.IsKeyPressed(Keys.J))
         {
@@ -1192,6 +1253,19 @@ public sealed class Game1 : Game
             _shotCharges > 0
                 ? new Color(255, 214, 10)
                 : new Color(255, 80, 100)
+        );
+
+        // ML-2 CHANGE:
+        // Show whether the bot is currently controlling the drone.
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            _isBotEnabled ? "BOT ON" : "BOT OFF",
+            new Vector2(700, 18),
+            2,
+            _isBotEnabled
+                ? new Color(0, 217, 255)
+                : new Color(255, 255, 255)
         );
     }
 
