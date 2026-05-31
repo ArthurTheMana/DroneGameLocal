@@ -58,6 +58,12 @@ public sealed class Game1 : Game
 
     private bool _isBotEnabled;
 
+    // ML-2 POLISH:
+    // If bot was used at any time during this run,
+    // the score should not be saved as BEST.
+    // This keeps human high score fair.
+    private bool _wasBotUsedThisRun;
+
     private readonly ObstacleSpawner _obstacleSpawner = new();
 
     // LEVEL 4A CHANGE:
@@ -154,6 +160,12 @@ public sealed class Game1 : Game
         if (_inputManager.IsKeyPressed(Keys.B))
         {
             _isBotEnabled = !_isBotEnabled;
+
+            if (_isBotEnabled)
+            {
+                _wasBotUsedThisRun = true;
+                _botPlayer.Reset();
+            }
         }
 
         if (_gameState.Current == GameStateType.Start)
@@ -302,6 +314,11 @@ public sealed class Game1 : Game
 
     private void StartNewGame()
     {
+
+        // ML-2 POLISH:
+        // Reset bot smoothing state when a new run starts.
+        _botPlayer.Reset();
+
         // ML-1 CHANGE:
         // Reset survival timer for the new run.
         _survivalSeconds = 0f;
@@ -309,6 +326,10 @@ public sealed class Game1 : Game
         // ML-1 CHANGE:
         // Reset feedback flag for the new run.
         _hasSavedMlFeedback = false;
+
+        // ML-2 POLISH:
+        // New run starts as human-only until bot is enabled.
+        _wasBotUsedThisRun = false;
 
         _gameState.StartGame(_difficultySettings.StartingLives);
 
@@ -406,6 +427,7 @@ public sealed class Game1 : Game
         }
 
         BotDecision decision = _botPlayer.GetDecision(
+            deltaTime,
             _drone,
             _obstacles,
             _enemies,
@@ -851,7 +873,8 @@ public sealed class Game1 : Game
 
         _collisionCooldown = GameSettings.CollisionCooldownSeconds;
 
-        if (_gameState.Current == GameStateType.Fail)
+        if (_gameState.Current == GameStateType.Fail &&
+            !_wasBotUsedThisRun)
         {
             _scoreManager.SaveHighScoreIfNeeded();
         }

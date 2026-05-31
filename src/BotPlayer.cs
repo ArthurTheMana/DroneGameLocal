@@ -8,6 +8,11 @@ namespace DroneGameLocal;
 // This is a rule-based autoplayer used to collect gameplay data faster.
 // This is NOT Machine Learning yet.
 // It uses simple rules to dodge danger and shoot when useful.
+//
+// ML-2 POLISH:
+// Bot movement is now smoother.
+// Instead of instantly changing direction every frame,
+// the bot updates decisions in small intervals and blends movement over time.
 public sealed class BotPlayer
 {
     private const int BulletDangerRange = 320;
@@ -18,7 +23,26 @@ public sealed class BotPlayer
     private const float PreferredX = 120f;
     private const float PreferredY = 330f;
 
+    private const float DecisionRefreshSeconds = 0.10f;
+    private const float MovementSmoothSpeed = 7.5f;
+    private const float BotShootCooldownSeconds = 0.35f;
+
+    private Vector2 _smoothedMovement = Vector2.Zero;
+    private Vector2 _lastDesiredMovement = Vector2.Zero;
+
+    private float _decisionTimer;
+    private float _shootCooldownTimer;
+
+    public void Reset()
+    {
+        _smoothedMovement = Vector2.Zero;
+        _lastDesiredMovement = Vector2.Zero;
+        _decisionTimer = 0f;
+        _shootCooldownTimer = 0f;
+    }
+
     public BotDecision GetDecision(
+        float deltaTime,
         Drone drone,
         IReadOnlyList<Obstacle> obstacles,
         IReadOnlyList<Enemy> enemies,
@@ -27,39 +51,82 @@ public sealed class BotPlayer
         int shotCharges,
         int activePlayerShots)
     {
-        Rectangle droneBox = drone.GetBounds();
-
-        Vector2 movement = GetDefensiveMovement(
-            droneBox,
-            obstacles,
-            enemies,
-            enemyBullets,
-            shields
-        );
-
-        if (movement == Vector2.Zero)
+        if (_shootCooldownTimer > 0f)
         {
-            movement = GetCenteringMovement(drone);
+            _shootCooldownTimer -= deltaTime;
         }
 
-        if (movement.LengthSquared() > 1f)
+        _decisionTimer -= deltaTime;
+
+        if (_decisionTimer <= 0f)
         {
-            movement.Normalize();
+            _decisionTimer = DecisionRefreshSeconds;
+
+            Rectangle droneBox = drone.GetBounds();
+
+            Vector2 movement = GetDefensiveMovement(
+                droneBox,
+                obstacles,
+                enemies,
+                enemyBullets,
+                shields
+            );
+
+            if (movement == Vector2.Zero)
+            {
+                movement = GetCenteringMovement(drone);
+            }
+
+            if (movement.LengthSquared() > 1f)
+            {
+                movement.Normalize();
+            }
+
+            _lastDesiredMovement = movement;
         }
 
-        bool shouldFire = ShouldFire(
-            droneBox,
-            enemies,
-            enemyBullets,
-            shields,
-            obstacles,
-            shotCharges,
-            activePlayerShots
+        float lerpAmount = MathHelper.Clamp(
+            deltaTime * MovementSmoothSpeed,
+            0f,
+            1f
         );
+
+        _smoothedMovement = Vector2.Lerp(
+            _smoothedMovement,
+            _lastDesiredMovement,
+            lerpAmount
+        );
+
+        if (_smoothedMovement.LengthSquared() > 1f)
+        {
+            _smoothedMovement.Normalize();
+        }
+
+        bool shouldFire = false;
+
+        if (_shootCooldownTimer <= 0f)
+        {
+            Rectangle droneBox = drone.GetBounds();
+
+            shouldFire = ShouldFire(
+                droneBox,
+                enemies,
+                enemyBullets,
+                shields,
+                obstacles,
+                shotCharges,
+                activePlayerShots
+            );
+
+            if (shouldFire)
+            {
+                _shootCooldownTimer = BotShootCooldownSeconds;
+            }
+        }
 
         return new BotDecision
         {
-            MovementDirection = movement,
+            MovementDirection = _smoothedMovement,
             ShouldFire = shouldFire
         };
     }
@@ -71,7 +138,6 @@ public sealed class BotPlayer
         IReadOnlyList<EnemyBullet> enemyBullets,
         IReadOnlyList<EnergyShield> shields)
     {
-        // Highest priority: dodge enemy bullets.
         foreach (EnemyBullet bullet in enemyBullets)
         {
             Rectangle bulletBox = bullet.GetBounds();
@@ -83,7 +149,6 @@ public sealed class BotPlayer
             }
         }
 
-        // Next priority: dodge tank shields.
         foreach (EnergyShield shield in shields)
         {
             Rectangle shieldBox = shield.GetBounds();
@@ -95,7 +160,6 @@ public sealed class BotPlayer
             }
         }
 
-        // Next priority: dodge obstacles.
         foreach (Obstacle obstacle in obstacles)
         {
             Rectangle obstacleBox = obstacle.GetBounds();
@@ -107,7 +171,6 @@ public sealed class BotPlayer
             }
         }
 
-        // Last priority: avoid enemy body collision.
         foreach (Enemy enemy in enemies)
         {
             Rectangle enemyBox = enemy.GetBounds();
@@ -161,7 +224,6 @@ public sealed class BotPlayer
             return false;
         }
 
-        // Prevent the bot from filling the screen with too many player shots.
         if (activePlayerShots >= 2)
         {
             return false;
@@ -219,16 +281,29 @@ public sealed class BotPlayer
         float droneCenterY = droneBox.Center.Y;
         float threatCenterY = threatBox.Center.Y;
 
+        float yDirection;
+
         if (Math.Abs(droneCenterY - threatCenterY) < 8f)
         {
-            return droneCenterY < GameSettings.ScreenHeight / 2f
-                ? new Vector2(0f, -1f)
-                : new Vector2(0f, 1f);
+            yDirection = droneCenterY < GameSettings.ScreenHeight / 2f
+                ? -1f
+                : 1f;
+        }
+        else
+        {
+            yDirection = droneCenterY < threatCenterY
+                ? -1f
+                : 1f;
         }
 
-        return droneCenterY < threatCenterY
-            ? new Vector2(0f, -1f)
-            : new Vector2(0f, 1f);
+        // ML-2 POLISH:
+        // Add a small horizontal move so the bot feels less robotic.
+        // It still mostly dodges vertically, but not in a perfectly stiff line.
+        float xDirection = threatBox.Left < droneBox.Right + 100
+            ? -0.25f
+            : 0.10f;
+
+        return new Vector2(xDirection, yDirection);
     }
 
     private static bool IsGoodShotTarget(
