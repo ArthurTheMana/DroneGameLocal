@@ -953,7 +953,9 @@ public sealed class Game1 : Game
 
         if (_gameState.Current == GameStateType.Start)
         {
-            DrawPanel(new Color(30, 70, 120, 210));
+            DrawStartPanel(new Color(30, 70, 120, 210));
+
+
 
             PixelText.DrawCenteredText(
                 _spriteBatch!,
@@ -993,6 +995,16 @@ public sealed class Game1 : Game
                 300,
                 2,
                 Color.White
+            );
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                "PRESS B TO TOGGLE BOT",
+                GameSettings.ScreenWidth,
+                440,
+                2,
+                new Color(0, 217, 255)
             );
 
             PixelText.DrawCenteredText(
@@ -1502,6 +1514,21 @@ public sealed class Game1 : Game
             GameSettings.ScreenHeight / 2 - 140,
             600,
             280
+        );
+
+        DrawRect(panel, color);
+    }
+
+    // UI POLISH:
+    // Larger panel for the start menu.
+    // This gives enough room for difficulty, shooting, bot, and ML instructions.
+    private void DrawStartPanel(Color color)
+    {
+        var panel = new Rectangle(
+            GameSettings.ScreenWidth / 2 - 390,
+            GameSettings.ScreenHeight / 2 - 200,
+            780,
+            400
         );
 
         DrawRect(panel, color);
