@@ -64,6 +64,10 @@ public sealed class Game1 : Game
     // This keeps human high score fair.
     private bool _wasBotUsedThisRun;
 
+    // ML-2 POLISH:
+    // Random generator for bot difficulty selection.
+    private readonly System.Random _botRandom = new();
+
     private readonly ObstacleSpawner _obstacleSpawner = new();
 
     // LEVEL 4A CHANGE:
@@ -236,8 +240,13 @@ public sealed class Game1 : Game
 
     private void UpdateGameOverState(GameTime gameTime)
     {
+        // ML-2 CHANGE:
+        // If the bot was used, automatically save feedback.
+        // Human-only runs still ask the player to press F1/F2/F3.
+        HandleBotAutoFeedback();
+
         // ML-1 CHANGE:
-        // After Game Over, ask the player to label the whole run.
+        // After Game Over, ask human player to label the whole run.
         HandleGameOverFeedback();
 
         if (_inputManager.IsKeyPressed(Keys.Enter) ||
@@ -328,8 +337,16 @@ public sealed class Game1 : Game
         _hasSavedMlFeedback = false;
 
         // ML-2 POLISH:
-        // New run starts as human-only until bot is enabled.
-        _wasBotUsedThisRun = false;
+        // If bot is enabled before the run starts,
+        // this run is counted as a bot run.
+        _wasBotUsedThisRun = _isBotEnabled;
+
+        // ML-2 POLISH:
+        // Bot chooses a random difficulty at the start of every bot run.
+        if (_isBotEnabled)
+        {
+            SelectRandomDifficultyForBotRun();
+        }
 
         _gameState.StartGame(_difficultySettings.StartingLives);
 
@@ -362,6 +379,21 @@ public sealed class Game1 : Game
     {
         _selectedDifficulty = level;
         _difficultySettings = DifficultySettings.Get(level);
+    }
+
+    // ML-2 POLISH:
+    // Bot runs choose Easy, Normal, or Hard randomly.
+    // This creates more varied ML training data.
+    private void SelectRandomDifficultyForBotRun()
+    {
+        DifficultyLevel randomDifficulty = _botRandom.Next(3) switch
+        {
+            0 => DifficultyLevel.Easy,
+            1 => DifficultyLevel.Normal,
+            _ => DifficultyLevel.Hard
+        };
+
+        SetDifficulty(randomDifficulty);
     }
 
     private void SelectNextDifficulty()
@@ -686,8 +718,9 @@ public sealed class Game1 : Game
 
             bool shotRemoved = false;
 
-            // LEVEL 4B CHANGE:
-            // Player shot can destroy enemy bullets.
+            // LEVEL 5A POLISH:
+            // Player shots can destroy enemy bullets and gain small points.
+            // This works for both human and bot because both use the same shot system.
             for (int bulletIndex = _enemyBullets.Count - 1; bulletIndex >= 0; bulletIndex--)
             {
                 EnemyBullet bullet = _enemyBullets[bulletIndex];
@@ -707,6 +740,8 @@ public sealed class Game1 : Game
                 _enemyBullets.RemoveAt(bulletIndex);
                 _shots.RemoveAt(shotIndex);
 
+                _scoreManager.AddScore(GameSettings.DestroyEnemyBulletScore);
+
                 shotRemoved = true;
                 break;
             }
@@ -716,10 +751,10 @@ public sealed class Game1 : Game
                 continue;
             }
 
-            // LEVEL 5A CHANGE:
-            // Tank shields block player shots.
-            // A shield can be destroyed after enough hits,
-            // or it will dissolve naturally over time.
+            // LEVEL 5A POLISH:
+            // Tank shields / barricades block shots.
+            // If the shield is destroyed, the player gets points.
+            // Human and bot both receive the reward.
             for (int shieldIndex = _shields.Count - 1; shieldIndex >= 0; shieldIndex--)
             {
                 EnergyShield shield = _shields[shieldIndex];
@@ -740,6 +775,7 @@ public sealed class Game1 : Game
                 if (shield.IsDestroyed())
                 {
                     _shields.RemoveAt(shieldIndex);
+                    _scoreManager.AddScore(GameSettings.DestroyShieldScore);
                 }
 
                 _shots.RemoveAt(shotIndex);
@@ -753,6 +789,10 @@ public sealed class Game1 : Game
                 continue;
             }
 
+            // LEVEL 5A POLISH:
+            // Destroying enemies gives score.
+            // Scout, ZigZag, and Sniper usually die in 1 hit.
+            // Tank needs 2 hits, so score is only awarded when Tank is fully destroyed.
             for (int enemyIndex = _enemies.Count - 1; enemyIndex >= 0; enemyIndex--)
             {
                 Enemy enemy = _enemies[enemyIndex];
@@ -767,10 +807,6 @@ public sealed class Game1 : Game
                     enemy.Position.Y + enemy.Height / 2f
                 );
 
-                // LEVEL 5A CHANGE:
-                // Shots now damage enemies instead of always destroying them instantly.
-                // Scout, ZigZag, and Sniper die in 1 hit.
-                // Tank needs 2 hits.
                 enemy.TakeDamage(1);
 
                 _particles.EmitCrash(hitPosition);
@@ -797,6 +833,9 @@ public sealed class Game1 : Game
                 continue;
             }
 
+            // LEVEL 5A POLISH:
+            // Destroying obstacles / barricades now gives points too.
+            // This makes shooting useful even when there are no enemies nearby.
             for (int obstacleIndex = _obstacles.Count - 1; obstacleIndex >= 0; obstacleIndex--)
             {
                 Obstacle obstacle = _obstacles[obstacleIndex];
@@ -815,6 +854,8 @@ public sealed class Game1 : Game
 
                 _obstacles.RemoveAt(obstacleIndex);
                 _shots.RemoveAt(shotIndex);
+
+                _scoreManager.AddScore(GameSettings.DestroyObstacleScore);
 
                 break;
             }
@@ -1085,9 +1126,20 @@ public sealed class Game1 : Game
                 new Color(255, 214, 10)
             );
 
-            string feedbackText = _hasSavedMlFeedback
-                ? "FEEDBACK SAVED THANK YOU"
-                : "F1 TOO EASY  F2 OK  F3 TOO HARD";
+            string feedbackText;
+
+            if (_hasSavedMlFeedback && _wasBotUsedThisRun)
+            {
+                feedbackText = "BOT FEEDBACK AUTO SAVED";
+            }
+            else if (_hasSavedMlFeedback)
+            {
+                feedbackText = "FEEDBACK SAVED THANK YOU";
+            }
+            else
+            {
+                feedbackText = "1 TOO EASY  2 NORMAL  3 TOO HARD";
+            }
 
             PixelText.DrawCenteredText(
                 _spriteBatch!,
@@ -1171,16 +1223,19 @@ public sealed class Game1 : Game
 
     private void DrawHud()
     {
+        // UI POLISH:
+        // Taller HUD so text does not overlap.
         DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, 132),
-            new Color(0, 0, 0, 120)
+            new Rectangle(0, 0, GameSettings.ScreenWidth, 150),
+            new Color(0, 0, 0, 145)
         );
 
+        // LEFT SIDE: score and game pressure numbers.
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"SCORE {_scoreManager.Score}",
-            new Vector2(20, 18),
+            new Vector2(24, 18),
             3,
             Color.White
         );
@@ -1188,26 +1243,8 @@ public sealed class Game1 : Game
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            $"LIVES {_gameState.Lives}",
-            new Vector2(300, 18),
-            3,
-            new Color(0, 217, 255)
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"BEST {_scoreManager.HighScore}",
-            new Vector2(570, 18),
-            3,
-            new Color(255, 214, 10)
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
             $"MODE {_difficultySettings.Name}",
-            new Vector2(20, 52),
+            new Vector2(24, 54),
             2,
             Color.White
         );
@@ -1216,43 +1253,102 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"OBSTACLES {_obstacleSpawner.CurrentMaxObstacles}/{_difficultySettings.MaxObstacles}",
-            new Vector2(20, 78),
+            new Vector2(24, 84),
             2,
             new Color(255, 214, 10)
-        );
-
-        DrawProgressBar(
-            x: 360,
-            y: 80,
-            width: 320,
-            height: 14,
-            progress: _obstacleSpawner.ProgressPercent
         );
 
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"ENEMIES {_enemySpawner.CurrentMaxEnemies}/{_difficultySettings.MaxEnemies}",
-            new Vector2(20, 104),
+            new Vector2(24, 112),
+            2,
+            new Color(255, 140, 40)
+        );
+
+        // CENTER: lives and pressure bars.
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"LIVES {_gameState.Lives}",
+            new Vector2(360, 18),
+            3,
+            new Color(0, 217, 255)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            "OBSTACLE PRESSURE",
+            new Vector2(330, 62),
+            2,
+            new Color(255, 214, 10)
+        );
+
+        DrawProgressBar(
+            x: 330,
+            y: 84,
+            width: 330,
+            height: 16,
+            progress: _obstacleSpawner.ProgressPercent
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            "ENEMY PRESSURE",
+            new Vector2(330, 108),
             2,
             new Color(255, 140, 40)
         );
 
         DrawProgressBar(
-            x: 360,
-            y: 106,
-            width: 320,
-            height: 14,
+            x: 330,
+            y: 130,
+            width: 330,
+            height: 16,
             progress: _enemySpawner.ProgressPercent
         );
 
-        // LEVEL 4C CHANGE:
-        // Show stored shot charges and recharge progress.
+        // RIGHT SIDE: best, bot, and shot status.
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"BEST {_scoreManager.HighScore}",
+            new Vector2(700, 18),
+            2,
+            new Color(255, 214, 10)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            _isBotEnabled ? "BOT ON" : "BOT OFF",
+            new Vector2(700, 44),
+            2,
+            _isBotEnabled
+                ? new Color(0, 217, 255)
+                : Color.White
+        );
+
+        if (_wasBotUsedThisRun)
+        {
+            PixelText.DrawText(
+                _spriteBatch!,
+                _pixel!,
+                "NO BEST",
+                new Vector2(700, 70),
+                2,
+                new Color(255, 80, 100)
+            );
+        }
+
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"SHOT {_shotCharges}/{GameSettings.MaxShotCharges}",
-            new Vector2(700, 52),
+            new Vector2(700, 96),
             2,
             new Color(0, 217, 255)
         );
@@ -1267,40 +1363,10 @@ public sealed class Game1 : Game
 
         DrawProgressBar(
             x: 700,
-            y: 80,
-            width: 150,
+            y: 120,
+            width: 160,
             height: 14,
             progress: rechargeProgress
-        );
-
-        // LEVEL 4E POLISH:
-        // When no shot charges are available, show a clearer status message.
-        string shotStatusText = _shotCharges > 0
-            ? "PRESS J TO FIRE"
-            : "RECHARGING";
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            shotStatusText,
-            new Vector2(700, 104),
-            2,
-            _shotCharges > 0
-                ? new Color(255, 214, 10)
-                : new Color(255, 80, 100)
-        );
-
-        // ML-2 CHANGE:
-        // Show whether the bot is currently controlling the drone.
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            _isBotEnabled ? "BOT ON" : "BOT OFF",
-            new Vector2(700, 18),
-            2,
-            _isBotEnabled
-                ? new Color(0, 217, 255)
-                : new Color(255, 255, 255)
         );
     }
 
@@ -1620,9 +1686,9 @@ public sealed class Game1 : Game
 
     // ML-1 CHANGE:
     // Game Over feedback for supervised learning.
-    // F1 = Too Easy
-    // F2 = Balanced
-    // F3 = Too Hard
+    // 1 = Too Easy
+    // 2 = Normal / Balanced
+    // 3 = Too Hard
     private void HandleGameOverFeedback()
     {
         if (_hasSavedMlFeedback)
@@ -1630,23 +1696,96 @@ public sealed class Game1 : Game
             return;
         }
 
-        if (_inputManager.IsKeyPressed(Keys.F1))
+        if (_inputManager.IsKeyPressed(Keys.D1) ||
+            _inputManager.IsKeyPressed(Keys.NumPad1))
         {
             LogMlSample(GameBalanceLabel.TooEasy);
             _hasSavedMlFeedback = true;
         }
 
-        if (_inputManager.IsKeyPressed(Keys.F2))
+        if (_inputManager.IsKeyPressed(Keys.D2) ||
+            _inputManager.IsKeyPressed(Keys.NumPad2))
         {
+            // NOTE:
+            // We show this as "Normal" to the player,
+            // but internally the ML label is still Balanced.
             LogMlSample(GameBalanceLabel.Balanced);
             _hasSavedMlFeedback = true;
         }
 
-        if (_inputManager.IsKeyPressed(Keys.F3))
+        if (_inputManager.IsKeyPressed(Keys.D3) ||
+            _inputManager.IsKeyPressed(Keys.NumPad3))
         {
             LogMlSample(GameBalanceLabel.TooHard);
             _hasSavedMlFeedback = true;
         }
+    }
+
+    // ML-2 POLISH:
+    // Bot runs can be automatically labeled at Game Over.
+    // This helps generate CSV training data faster.
+    private void HandleBotAutoFeedback()
+    {
+        if (_hasSavedMlFeedback)
+        {
+            return;
+        }
+
+        if (!_wasBotUsedThisRun)
+        {
+            return;
+        }
+
+        GameBalanceLabel autoLabel = GetBotAutoFeedbackLabel();
+
+        LogMlSample(autoLabel);
+
+        _hasSavedMlFeedback = true;
+    }
+
+    // ML-2 POLISH:
+    // Simple threshold-based label for bot-generated runs.
+    // This is not Machine Learning yet.
+    // It is rule-based auto-labeling for faster dataset collection.
+    private GameBalanceLabel GetBotAutoFeedbackLabel()
+    {
+        float tooHardSeconds;
+        float tooEasySeconds;
+        int tooEasyScore;
+
+        switch (_selectedDifficulty)
+        {
+            case DifficultyLevel.Easy:
+                tooHardSeconds = 35f;
+                tooEasySeconds = 110f;
+                tooEasyScore = 900;
+                break;
+
+            case DifficultyLevel.Hard:
+                tooHardSeconds = 22f;
+                tooEasySeconds = 75f;
+                tooEasyScore = 700;
+                break;
+
+            default:
+                tooHardSeconds = 30f;
+                tooEasySeconds = 90f;
+                tooEasyScore = 800;
+                break;
+        }
+
+        if (_survivalSeconds <= tooHardSeconds)
+        {
+            return GameBalanceLabel.TooHard;
+        }
+
+        if (_survivalSeconds >= tooEasySeconds ||
+            _scoreManager.Score >= tooEasyScore)
+        {
+            return GameBalanceLabel.TooEasy;
+        }
+
+        return GameBalanceLabel.Balanced;
     }
 
     // ML-1 CHANGE:
@@ -1677,8 +1816,10 @@ public sealed class Game1 : Game
             Label = label.ToString()
         };
 
-        _gameplayDataLogger.Log(sample);
+        bool saved = _gameplayDataLogger.Log(sample);
 
-        Window.Title = $"ML feedback saved: {label}";
+        Window.Title = saved
+            ? $"ML feedback saved: {label}"
+            : "ML feedback failed - close CSV file";
     }
 }

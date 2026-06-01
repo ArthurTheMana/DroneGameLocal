@@ -22,6 +22,14 @@ public static class GameSettings
 
     public const float ShotSpeed = 650f;
 
+    // LEVEL 5A POLISH:
+    // Score rewards for destroying objects with player shots.
+    // These rewards apply to both human player and bot.
+    // Bot can gain score, but bot score should not save as BEST.
+    public const int DestroyEnemyBulletScore = 5;
+    public const int DestroyObstacleScore = 20;
+    public const int DestroyShieldScore = 25;
+
     // LEVEL 4B CHANGE:
     // Enemy bullet settings.
     // Bullet speed comes from DifficultySettings because Easy / Normal / Hard should feel different.
@@ -44,4 +52,6 @@ public static class GameSettings
     public const float SniperStopXOffset = 260f;
     public const float SniperAimSeconds = 0.85f;
     public const float SniperRetreatSpeedMultiplier = 1.55f;
+
+
 }

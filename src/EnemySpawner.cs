@@ -300,14 +300,25 @@ public sealed class EnemySpawner
         };
     }
 
+    // LEVEL 5A POLISH:
+    // Enemy kill rewards are increased.
+    // This makes shooting enemies feel more useful and satisfying.
+    // Bigger / more dangerous enemies give more points.
     private int GetScoreReward(EnemyType type)
     {
         return type switch
         {
-            EnemyType.Tank => _settings.PointsPerEnemy + 25,
-            EnemyType.ZigZag => _settings.PointsPerEnemy + 15,
-            EnemyType.Sniper => _settings.PointsPerEnemy + 20,
-            _ => _settings.PointsPerEnemy
+            // Tank is bigger and needs more hits, so it gives the highest reward.
+            EnemyType.Tank => _settings.PointsPerEnemy + 45,
+
+            // ZigZag is harder to hit because it moves wider and faster.
+            EnemyType.ZigZag => _settings.PointsPerEnemy + 30,
+
+            // Sniper is dangerous because it appears, aims, shoots fast, then escapes.
+            EnemyType.Sniper => _settings.PointsPerEnemy + 40,
+
+            // Scout is basic, but still gives a small shooting bonus.
+            _ => _settings.PointsPerEnemy + 10
         };
     }
 

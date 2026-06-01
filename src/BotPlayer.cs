@@ -10,35 +10,57 @@ namespace DroneGameLocal;
 // It uses simple rules to dodge danger and shoot when useful.
 //
 // ML-2 POLISH:
-// Bot movement is now smoother.
-// Instead of instantly changing direction every frame,
-// the bot updates decisions in small intervals and blends movement over time.
+// Bot now uses roaming movement.
+// Instead of only staying near one center point,
+// it moves around the playable area with patrol targets.
+// It can move up, down, forward, and backward.
 public sealed class BotPlayer
 {
-    private const int BulletDangerRange = 320;
-    private const int ObstacleDangerRange = 260;
-    private const int EnemyDangerRange = 230;
-    private const int VerticalDangerMargin = 32;
+    private const int BulletDangerRange = 360;
+    private const int ObstacleDangerRange = 300;
+    private const int EnemyDangerRange = 260;
+    private const int ShieldDangerRange = 300;
 
-    private const float PreferredX = 120f;
-    private const float PreferredY = 330f;
+    private const int VerticalDangerMargin = 38;
 
-    private const float DecisionRefreshSeconds = 0.10f;
-    private const float MovementSmoothSpeed = 7.5f;
-    private const float BotShootCooldownSeconds = 0.35f;
+    private const float DecisionRefreshSeconds = 0.14f;
+    private const float MovementSmoothSpeed = 4.8f;
+    private const float BotShootCooldownSeconds = 0.45f;
+
+    // ML-2 POLISH:
+    // Bot patrol area.
+    // It does not use the full right side because that would be too dangerous,
+    // but it now moves much more than before.
+    private const float PatrolMinX = 60f;
+    private const float PatrolMaxX = 330f;
+    private const float PatrolMinY = 165f;
+    private const float PatrolMaxY = 535f;
+
+    private const float PatrolTargetReachDistance = 34f;
+    private const float PatrolRetargetSeconds = 1.25f;
+
+    private readonly Random _random = new();
 
     private Vector2 _smoothedMovement = Vector2.Zero;
     private Vector2 _lastDesiredMovement = Vector2.Zero;
+    private Vector2 _patrolTarget = new(120f, 330f);
 
     private float _decisionTimer;
     private float _shootCooldownTimer;
+    private float _patrolTimer;
+    private float _driftTimer;
 
     public void Reset()
     {
         _smoothedMovement = Vector2.Zero;
         _lastDesiredMovement = Vector2.Zero;
+
         _decisionTimer = 0f;
         _shootCooldownTimer = 0f;
+        _patrolTimer = 0f;
+        _driftTimer = 0f;
+
+        PickNewPatrolTarget();
     }
 
     public BotDecision GetDecision(
@@ -51,10 +73,15 @@ public sealed class BotPlayer
         int shotCharges,
         int activePlayerShots)
     {
+        _driftTimer += deltaTime;
+        _patrolTimer -= deltaTime;
+
         if (_shootCooldownTimer > 0f)
         {
             _shootCooldownTimer -= deltaTime;
         }
+
+        UpdatePatrolTargetIfNeeded(drone);
 
         _decisionTimer -= deltaTime;
 
@@ -64,7 +91,8 @@ public sealed class BotPlayer
 
             Rectangle droneBox = drone.GetBounds();
 
-            Vector2 movement = GetDefensiveMovement(
+            Vector2 patrolMovement = GetPatrolMovement(drone);
+            Vector2 dangerMovement = GetDangerAvoidanceMovement(
                 droneBox,
                 obstacles,
                 enemies,
@@ -72,10 +100,17 @@ public sealed class BotPlayer
                 shields
             );
 
-            if (movement == Vector2.Zero)
-            {
-                movement = GetCenteringMovement(drone);
-            }
+            // ML-2 POLISH:
+            // Small natural drift prevents the bot from moving like a strict machine.
+            Vector2 driftMovement = new Vector2(
+                (float)Math.Sin(_driftTimer * 1.7f) * 0.18f,
+                (float)Math.Sin(_driftTimer * 2.4f) * 0.22f
+            );
+
+            Vector2 movement =
+                patrolMovement * 0.75f +
+                dangerMovement * 1.65f +
+                driftMovement;
 
             if (movement.LengthSquared() > 1f)
             {
@@ -131,83 +166,174 @@ public sealed class BotPlayer
         };
     }
 
-    private static Vector2 GetDefensiveMovement(
+    private void UpdatePatrolTargetIfNeeded(Drone drone)
+    {
+        Vector2 droneCenter = new Vector2(
+            drone.Position.X + drone.Width / 2f,
+            drone.Position.Y + drone.Height / 2f
+        );
+
+        float distanceToTarget = Vector2.Distance(droneCenter, _patrolTarget);
+
+        if (_patrolTimer <= 0f ||
+            distanceToTarget <= PatrolTargetReachDistance)
+        {
+            PickNewPatrolTarget();
+        }
+    }
+
+    private void PickNewPatrolTarget()
+    {
+        float x = PatrolMinX +
+                  (float)_random.NextDouble() * (PatrolMaxX - PatrolMinX);
+
+        float y = PatrolMinY +
+                  (float)_random.NextDouble() * (PatrolMaxY - PatrolMinY);
+
+        _patrolTarget = new Vector2(x, y);
+        _patrolTimer = PatrolRetargetSeconds +
+                       (float)_random.NextDouble() * 1.10f;
+    }
+
+    private Vector2 GetPatrolMovement(Drone drone)
+    {
+        Vector2 droneCenter = new Vector2(
+            drone.Position.X + drone.Width / 2f,
+            drone.Position.Y + drone.Height / 2f
+        );
+
+        Vector2 direction = _patrolTarget - droneCenter;
+
+        if (direction.LengthSquared() < 1f)
+        {
+            return Vector2.Zero;
+        }
+
+        direction.Normalize();
+        return direction;
+    }
+
+    private static Vector2 GetDangerAvoidanceMovement(
         Rectangle droneBox,
         IReadOnlyList<Obstacle> obstacles,
         IReadOnlyList<Enemy> enemies,
         IReadOnlyList<EnemyBullet> enemyBullets,
         IReadOnlyList<EnergyShield> shields)
     {
+        Vector2 avoidance = Vector2.Zero;
+
         foreach (EnemyBullet bullet in enemyBullets)
         {
-            Rectangle bulletBox = bullet.GetBounds();
-
-            if (IsThreatInFront(droneBox, bulletBox, BulletDangerRange) &&
-                HasVerticalOverlap(droneBox, bulletBox, VerticalDangerMargin))
-            {
-                return DodgeAwayFrom(droneBox, bulletBox);
-            }
+            avoidance += GetAvoidanceFromThreat(
+                droneBox,
+                bullet.GetBounds(),
+                BulletDangerRange,
+                VerticalDangerMargin,
+                2.7f
+            );
         }
 
         foreach (EnergyShield shield in shields)
         {
-            Rectangle shieldBox = shield.GetBounds();
-
-            if (IsThreatInFront(droneBox, shieldBox, ObstacleDangerRange) &&
-                HasVerticalOverlap(droneBox, shieldBox, VerticalDangerMargin))
-            {
-                return DodgeAwayFrom(droneBox, shieldBox);
-            }
+            avoidance += GetAvoidanceFromThreat(
+                droneBox,
+                shield.GetBounds(),
+                ShieldDangerRange,
+                VerticalDangerMargin,
+                2.2f
+            );
         }
 
         foreach (Obstacle obstacle in obstacles)
         {
-            Rectangle obstacleBox = obstacle.GetBounds();
-
-            if (IsThreatInFront(droneBox, obstacleBox, ObstacleDangerRange) &&
-                HasVerticalOverlap(droneBox, obstacleBox, VerticalDangerMargin))
-            {
-                return DodgeAwayFrom(droneBox, obstacleBox);
-            }
+            avoidance += GetAvoidanceFromThreat(
+                droneBox,
+                obstacle.GetBounds(),
+                ObstacleDangerRange,
+                VerticalDangerMargin,
+                2.0f
+            );
         }
 
         foreach (Enemy enemy in enemies)
         {
-            Rectangle enemyBox = enemy.GetBounds();
-
-            if (IsThreatInFront(droneBox, enemyBox, EnemyDangerRange) &&
-                HasVerticalOverlap(droneBox, enemyBox, VerticalDangerMargin))
-            {
-                return DodgeAwayFrom(droneBox, enemyBox);
-            }
+            avoidance += GetAvoidanceFromThreat(
+                droneBox,
+                enemy.GetBounds(),
+                EnemyDangerRange,
+                VerticalDangerMargin,
+                1.5f
+            );
         }
 
-        return Vector2.Zero;
+        if (avoidance.LengthSquared() > 1f)
+        {
+            avoidance.Normalize();
+        }
+
+        return avoidance;
     }
 
-    private static Vector2 GetCenteringMovement(Drone drone)
+    private static Vector2 GetAvoidanceFromThreat(
+        Rectangle droneBox,
+        Rectangle threatBox,
+        int range,
+        int verticalMargin,
+        float weight)
     {
-        Vector2 direction = Vector2.Zero;
-
-        if (drone.Position.X < PreferredX - 12f)
+        if (!IsThreatRelevant(droneBox, threatBox, range, verticalMargin))
         {
-            direction.X += 1f;
-        }
-        else if (drone.Position.X > PreferredX + 12f)
-        {
-            direction.X -= 1f;
+            return Vector2.Zero;
         }
 
-        if (drone.Position.Y < PreferredY - 18f)
+        Vector2 droneCenter = new Vector2(
+            droneBox.Center.X,
+            droneBox.Center.Y
+        );
+
+        Vector2 threatCenter = new Vector2(
+            threatBox.Center.X,
+            threatBox.Center.Y
+        );
+
+        Vector2 away = droneCenter - threatCenter;
+
+        if (away.LengthSquared() < 1f)
         {
-            direction.Y += 1f;
-        }
-        else if (drone.Position.Y > PreferredY + 18f)
-        {
-            direction.Y -= 1f;
+            away = new Vector2(-1f, 0f);
         }
 
-        return direction;
+        away.Normalize();
+
+        float distanceX = Math.Abs(threatBox.Left - droneBox.Right);
+        float closeness = 1f - MathHelper.Clamp(distanceX / range, 0f, 1f);
+
+        // ML-2 POLISH:
+        // Extra backward movement when danger is very close.
+        // This lets the bot move forward/backward, not only up/down.
+        if (threatBox.Left < droneBox.Right + 90)
+        {
+            away.X -= 0.65f;
+        }
+
+        return away * closeness * weight;
+    }
+
+    private static bool IsThreatRelevant(
+        Rectangle droneBox,
+        Rectangle threatBox,
+        int range,
+        int verticalMargin)
+    {
+        bool closeInFront =
+            threatBox.Right >= droneBox.Left - 40 &&
+            threatBox.Left <= droneBox.Right + range;
+
+        bool verticalOverlap =
+            droneBox.Top - verticalMargin < threatBox.Bottom &&
+            droneBox.Bottom + verticalMargin > threatBox.Top;
+
+        return closeInFront && verticalOverlap;
     }
 
     private static bool ShouldFire(
@@ -231,7 +357,7 @@ public sealed class BotPlayer
 
         foreach (EnemyBullet bullet in enemyBullets)
         {
-            if (IsGoodShotTarget(droneBox, bullet.GetBounds(), 300, 28))
+            if (IsGoodShotTarget(droneBox, bullet.GetBounds(), 320, 32))
             {
                 return true;
             }
@@ -239,7 +365,7 @@ public sealed class BotPlayer
 
         foreach (Enemy enemy in enemies)
         {
-            if (IsGoodShotTarget(droneBox, enemy.GetBounds(), 520, 75))
+            if (IsGoodShotTarget(droneBox, enemy.GetBounds(), 540, 82))
             {
                 return true;
             }
@@ -247,7 +373,7 @@ public sealed class BotPlayer
 
         foreach (EnergyShield shield in shields)
         {
-            if (IsGoodShotTarget(droneBox, shield.GetBounds(), 380, 85))
+            if (IsGoodShotTarget(droneBox, shield.GetBounds(), 400, 88))
             {
                 return true;
             }
@@ -255,55 +381,13 @@ public sealed class BotPlayer
 
         foreach (Obstacle obstacle in obstacles)
         {
-            if (IsGoodShotTarget(droneBox, obstacle.GetBounds(), 330, 80))
+            if (IsGoodShotTarget(droneBox, obstacle.GetBounds(), 350, 85))
             {
                 return true;
             }
         }
 
         return false;
-    }
-
-    private static bool IsThreatInFront(Rectangle droneBox, Rectangle threatBox, int range)
-    {
-        return threatBox.Right >= droneBox.Left &&
-               threatBox.Left <= droneBox.Right + range;
-    }
-
-    private static bool HasVerticalOverlap(Rectangle droneBox, Rectangle threatBox, int margin)
-    {
-        return droneBox.Top - margin < threatBox.Bottom &&
-               droneBox.Bottom + margin > threatBox.Top;
-    }
-
-    private static Vector2 DodgeAwayFrom(Rectangle droneBox, Rectangle threatBox)
-    {
-        float droneCenterY = droneBox.Center.Y;
-        float threatCenterY = threatBox.Center.Y;
-
-        float yDirection;
-
-        if (Math.Abs(droneCenterY - threatCenterY) < 8f)
-        {
-            yDirection = droneCenterY < GameSettings.ScreenHeight / 2f
-                ? -1f
-                : 1f;
-        }
-        else
-        {
-            yDirection = droneCenterY < threatCenterY
-                ? -1f
-                : 1f;
-        }
-
-        // ML-2 POLISH:
-        // Add a small horizontal move so the bot feels less robotic.
-        // It still mostly dodges vertically, but not in a perfectly stiff line.
-        float xDirection = threatBox.Left < droneBox.Right + 100
-            ? -0.25f
-            : 0.10f;
-
-        return new Vector2(xDirection, yDirection);
     }
 
     private static bool IsGoodShotTarget(
