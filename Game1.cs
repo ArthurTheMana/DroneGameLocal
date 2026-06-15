@@ -202,31 +202,37 @@ public sealed class Game1 : Game
 
     private void UpdateStartState(GameTime gameTime)
     {
-        if (_inputManager.IsKeyPressed(Keys.Left) ||
-            _inputManager.IsKeyPressed(Keys.A))
+        // ML-2 POLISH:
+        // Manual difficulty selection is only for human mode.
+        // When bot is ON, the bot will randomly choose difficulty when the run starts.
+        if (!_isBotEnabled)
         {
-            SelectPreviousDifficulty();
-        }
+            if (_inputManager.IsKeyPressed(Keys.Left) ||
+                _inputManager.IsKeyPressed(Keys.A))
+            {
+                SelectPreviousDifficulty();
+            }
 
-        if (_inputManager.IsKeyPressed(Keys.Right) ||
-            _inputManager.IsKeyPressed(Keys.D))
-        {
-            SelectNextDifficulty();
-        }
+            if (_inputManager.IsKeyPressed(Keys.Right) ||
+                _inputManager.IsKeyPressed(Keys.D))
+            {
+                SelectNextDifficulty();
+            }
 
-        if (_inputManager.IsKeyPressed(Keys.D1))
-        {
-            SetDifficulty(DifficultyLevel.Easy);
-        }
+            if (_inputManager.IsKeyPressed(Keys.D1))
+            {
+                SetDifficulty(DifficultyLevel.Easy);
+            }
 
-        if (_inputManager.IsKeyPressed(Keys.D2))
-        {
-            SetDifficulty(DifficultyLevel.Normal);
-        }
+            if (_inputManager.IsKeyPressed(Keys.D2))
+            {
+                SetDifficulty(DifficultyLevel.Normal);
+            }
 
-        if (_inputManager.IsKeyPressed(Keys.D3))
-        {
-            SetDifficulty(DifficultyLevel.Hard);
+            if (_inputManager.IsKeyPressed(Keys.D3))
+            {
+                SetDifficulty(DifficultyLevel.Hard);
+            }
         }
 
         if (_inputManager.IsKeyPressed(Keys.Enter) ||
@@ -714,7 +720,10 @@ public sealed class Game1 : Game
         for (int shotIndex = _shots.Count - 1; shotIndex >= 0; shotIndex--)
         {
             ChargeShot shot = _shots[shotIndex];
-            Rectangle shotBox = shot.GetBounds();
+            // COLLISION POLISH:
+            // Use swept bounds instead of current bounds only.
+            // This prevents fast shots from slipping through targets.
+            Rectangle shotBox = shot.GetSweptBounds();
 
             bool shotRemoved = false;
 
@@ -877,9 +886,11 @@ public sealed class Game1 : Game
             }
         }
 
-        foreach (Enemy enemy in _enemies)
+        foreach (EnemyBullet bullet in _enemyBullets)
         {
-            if (droneBox.Intersects(enemy.GetBounds()))
+            // COLLISION POLISH:
+            // Use swept bounds so fast enemy bullets cannot visually pass through the drone.
+            if (droneBox.Intersects(bullet.GetSweptBounds()))
             {
                 crashed = true;
                 break;
@@ -1031,10 +1042,14 @@ public sealed class Game1 : Game
                 Color.White
             );
 
+            string modeText = _isBotEnabled
+                ? "BOT MODE RANDOM"
+                : $"MODE {_difficultySettings.Name}";
+
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
-                $"MODE {_difficultySettings.Name}",
+                modeText,
                 GameSettings.ScreenWidth,
                 215,
                 4,
@@ -1051,10 +1066,17 @@ public sealed class Game1 : Game
                 new Color(0, 217, 255)
             );
 
+            // ML-2 POLISH:
+            // In human mode, show manual difficulty selection.
+            // In bot mode, show that the bot will choose difficulty randomly.
+            string difficultyHelpText = _isBotEnabled
+                ? "BOT WILL PICK EASY NORMAL OR HARD"
+                : "1 EASY  2 NORMAL  3 HARD";
+
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
-                "1 EASY  2 NORMAL  3 HARD",
+                difficultyHelpText,
                 GameSettings.ScreenWidth,
                 300,
                 2,
@@ -1745,32 +1767,36 @@ public sealed class Game1 : Game
 
     // ML-2 POLISH:
     // Simple threshold-based label for bot-generated runs.
-    // This is not Machine Learning yet.
-    // It is rule-based auto-labeling for faster dataset collection.
+    // Survival time is the main signal.
+    // Score is only used as a secondary signal after the bot survives long enough.
     private GameBalanceLabel GetBotAutoFeedbackLabel()
     {
         float tooHardSeconds;
         float tooEasySeconds;
+        float minimumSecondsForScoreBasedTooEasy;
         int tooEasyScore;
 
         switch (_selectedDifficulty)
         {
             case DifficultyLevel.Easy:
                 tooHardSeconds = 35f;
-                tooEasySeconds = 110f;
-                tooEasyScore = 900;
+                tooEasySeconds = 130f;
+                minimumSecondsForScoreBasedTooEasy = 85f;
+                tooEasyScore = 1800;
                 break;
 
             case DifficultyLevel.Hard:
-                tooHardSeconds = 22f;
-                tooEasySeconds = 75f;
-                tooEasyScore = 700;
+                tooHardSeconds = 25f;
+                tooEasySeconds = 90f;
+                minimumSecondsForScoreBasedTooEasy = 60f;
+                tooEasyScore = 1500;
                 break;
 
             default:
                 tooHardSeconds = 30f;
-                tooEasySeconds = 90f;
-                tooEasyScore = 800;
+                tooEasySeconds = 105f;
+                minimumSecondsForScoreBasedTooEasy = 70f;
+                tooEasyScore = 1650;
                 break;
         }
 
@@ -1779,7 +1805,12 @@ public sealed class Game1 : Game
             return GameBalanceLabel.TooHard;
         }
 
-        if (_survivalSeconds >= tooEasySeconds ||
+        if (_survivalSeconds >= tooEasySeconds)
+        {
+            return GameBalanceLabel.TooEasy;
+        }
+
+        if (_survivalSeconds >= minimumSecondsForScoreBasedTooEasy &&
             _scoreManager.Score >= tooEasyScore)
         {
             return GameBalanceLabel.TooEasy;

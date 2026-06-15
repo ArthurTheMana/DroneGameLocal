@@ -85,13 +85,22 @@ public sealed class BotPlayer
 
         _decisionTimer -= deltaTime;
 
+        Rectangle droneBox = drone.GetBounds();
+
+        bool isInImmediateDanger = HasImmediateDanger(
+            droneBox,
+            obstacles,
+            enemies,
+            enemyBullets,
+            shields
+        );
+
         if (_decisionTimer <= 0f)
         {
             _decisionTimer = DecisionRefreshSeconds;
 
-            Rectangle droneBox = drone.GetBounds();
-
             Vector2 patrolMovement = GetPatrolMovement(drone);
+
             Vector2 dangerMovement = GetDangerAvoidanceMovement(
                 droneBox,
                 obstacles,
@@ -100,16 +109,21 @@ public sealed class BotPlayer
                 shields
             );
 
-            // ML-2 POLISH:
-            // Small natural drift prevents the bot from moving like a strict machine.
             Vector2 driftMovement = new Vector2(
-                (float)Math.Sin(_driftTimer * 1.7f) * 0.18f,
-                (float)Math.Sin(_driftTimer * 2.4f) * 0.22f
+                (float)Math.Sin(_driftTimer * 1.7f) * 0.14f,
+                (float)Math.Sin(_driftTimer * 2.4f) * 0.18f
             );
 
+            // ML-2 POLISH:
+            // Survival-first bot behavior.
+            // If danger is close, survival movement becomes much stronger.
+            // Patrol movement becomes weaker so the bot does not chase points.
+            float patrolWeight = isInImmediateDanger ? 0.12f : 0.55f;
+            float dangerWeight = isInImmediateDanger ? 3.20f : 1.85f;
+
             Vector2 movement =
-                patrolMovement * 0.75f +
-                dangerMovement * 1.65f +
+                patrolMovement * patrolWeight +
+                dangerMovement * dangerWeight +
                 driftMovement;
 
             if (movement.LengthSquared() > 1f)
@@ -141,8 +155,6 @@ public sealed class BotPlayer
 
         if (_shootCooldownTimer <= 0f)
         {
-            Rectangle droneBox = drone.GetBounds();
-
             shouldFire = ShouldFire(
                 droneBox,
                 enemies,
@@ -150,7 +162,8 @@ public sealed class BotPlayer
                 shields,
                 obstacles,
                 shotCharges,
-                activePlayerShots
+                activePlayerShots,
+                isInImmediateDanger
             );
 
             if (shouldFire)
@@ -164,22 +177,6 @@ public sealed class BotPlayer
             MovementDirection = _smoothedMovement,
             ShouldFire = shouldFire
         };
-    }
-
-    private void UpdatePatrolTargetIfNeeded(Drone drone)
-    {
-        Vector2 droneCenter = new Vector2(
-            drone.Position.X + drone.Width / 2f,
-            drone.Position.Y + drone.Height / 2f
-        );
-
-        float distanceToTarget = Vector2.Distance(droneCenter, _patrolTarget);
-
-        if (_patrolTimer <= 0f ||
-            distanceToTarget <= PatrolTargetReachDistance)
-        {
-            PickNewPatrolTarget();
-        }
     }
 
     private void PickNewPatrolTarget()
@@ -343,45 +340,80 @@ public sealed class BotPlayer
         IReadOnlyList<EnergyShield> shields,
         IReadOnlyList<Obstacle> obstacles,
         int shotCharges,
-        int activePlayerShots)
+        int activePlayerShots,
+        bool isInImmediateDanger)
     {
         if (shotCharges <= 0)
         {
             return false;
         }
 
-        if (activePlayerShots >= 2)
+        // ML-2 POLISH:
+        // Fewer active player shots makes the bot less spammy
+        // and more survival-focused.
+        if (activePlayerShots >= 1)
         {
             return false;
         }
 
+        // Highest priority:
+        // Shoot enemy bullets that are directly dangerous.
         foreach (EnemyBullet bullet in enemyBullets)
         {
-            if (IsGoodShotTarget(droneBox, bullet.GetBounds(), 320, 32))
+            if (IsGoodShotTarget(droneBox, bullet.GetBounds(), 300, 34))
             {
                 return true;
             }
         }
 
-        foreach (Enemy enemy in enemies)
-        {
-            if (IsGoodShotTarget(droneBox, enemy.GetBounds(), 540, 82))
-            {
-                return true;
-            }
-        }
-
+        // Defensive shooting:
+        // Shoot shields only if they are blocking or close.
         foreach (EnergyShield shield in shields)
         {
-            if (IsGoodShotTarget(droneBox, shield.GetBounds(), 400, 88))
+            Rectangle shieldBox = shield.GetBounds();
+
+            bool shieldIsClose =
+                shieldBox.Left < droneBox.Right + 260 &&
+                HasVerticalOverlap(droneBox, shieldBox, 70);
+
+            if (shieldIsClose &&
+                IsGoodShotTarget(droneBox, shieldBox, 340, 90))
             {
                 return true;
             }
         }
 
+        // Defensive shooting:
+        // Shoot obstacles only if they are blocking the bot's path.
+        // This stops the bot from shooting every obstacle just for points.
         foreach (Obstacle obstacle in obstacles)
         {
-            if (IsGoodShotTarget(droneBox, obstacle.GetBounds(), 350, 85))
+            Rectangle obstacleBox = obstacle.GetBounds();
+
+            bool obstacleIsBlocking =
+                obstacleBox.Left < droneBox.Right + 240 &&
+                HasVerticalOverlap(droneBox, obstacleBox, 70);
+
+            if (obstacleIsBlocking &&
+                IsGoodShotTarget(droneBox, obstacleBox, 300, 90))
+            {
+                return true;
+            }
+        }
+
+        // ML-2 POLISH:
+        // If danger is close, do not shoot enemies for points.
+        // Survive first, score later.
+        if (isInImmediateDanger)
+        {
+            return false;
+        }
+
+        // Offensive shooting:
+        // Only shoot enemies when the bot is not in immediate danger.
+        foreach (Enemy enemy in enemies)
+        {
+            if (IsGoodShotTarget(droneBox, enemy.GetBounds(), 520, 82))
             {
                 return true;
             }
@@ -390,6 +422,85 @@ public sealed class BotPlayer
         return false;
     }
 
+    // ML-2 POLISH:
+    // Checks if the bot is in immediate danger.
+    // When true, the bot should focus on survival, not scoring.
+    private static bool HasImmediateDanger(
+        Rectangle droneBox,
+        IReadOnlyList<Obstacle> obstacles,
+        IReadOnlyList<Enemy> enemies,
+        IReadOnlyList<EnemyBullet> enemyBullets,
+        IReadOnlyList<EnergyShield> shields)
+    {
+        foreach (EnemyBullet bullet in enemyBullets)
+        {
+            if (IsThreatRelevant(droneBox, bullet.GetBounds(), 210, 46))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnergyShield shield in shields)
+        {
+            if (IsThreatRelevant(droneBox, shield.GetBounds(), 190, 54))
+            {
+                return true;
+            }
+        }
+
+        foreach (Obstacle obstacle in obstacles)
+        {
+            if (IsThreatRelevant(droneBox, obstacle.GetBounds(), 190, 54))
+            {
+                return true;
+            }
+        }
+
+        foreach (Enemy enemy in enemies)
+        {
+            if (IsThreatRelevant(droneBox, enemy.GetBounds(), 160, 48))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // ML-2 POLISH:
+    // Update patrol target if the bot reached the current target
+    // or if the patrol timer has expired.
+    private void UpdatePatrolTargetIfNeeded(Drone drone)
+    {
+        Vector2 droneCenter = new Vector2(
+            drone.Position.X + drone.Width / 2f,
+            drone.Position.Y + drone.Height / 2f
+        );
+
+        float distanceToTarget = Vector2.Distance(droneCenter, _patrolTarget);
+
+        if (_patrolTimer <= 0f ||
+            distanceToTarget <= PatrolTargetReachDistance)
+        {
+            PickNewPatrolTarget();
+        }
+    }
+
+    // ML-2 POLISH:
+    // Checks if the drone and threat overlap vertically.
+    // Used for deciding if something is dangerous or blocking the bot.
+    private static bool HasVerticalOverlap(
+        Rectangle droneBox,
+        Rectangle threatBox,
+        int margin)
+    {
+        return droneBox.Top - margin < threatBox.Bottom &&
+               droneBox.Bottom + margin > threatBox.Top;
+    }
+
+    // ML-2 POLISH:
+    // Checks if a target is in front of the drone and close enough vertically.
+    // Used so the bot only shoots useful targets, not random objects.
     private static bool IsGoodShotTarget(
         Rectangle droneBox,
         Rectangle targetBox,
