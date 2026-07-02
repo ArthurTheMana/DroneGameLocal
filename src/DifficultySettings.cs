@@ -79,7 +79,7 @@ public sealed class DifficultySettings
             DifficultyLevel.Easy => new DifficultySettings
             {
                 Name = "Easy",
-                StartingLives = 5,
+                StartingLives = 2,
 
                 // LEVEL 4D POLISH:
                 // Easy starts calm and grows slowly.
@@ -171,7 +171,7 @@ public sealed class DifficultySettings
             _ => new DifficultySettings
             {
                 Name = "Normal",
-                StartingLives = 3,
+                StartingLives = 2,
 
                 // LEVEL 4D POLISH:
                 // Normal should be the best default experience.

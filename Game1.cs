@@ -1390,6 +1390,24 @@ public sealed class Game1 : Game
             height: 14,
             progress: rechargeProgress
         );
+
+        // UI POLISH:
+        // Show shot instruction/status under the charge bar.
+        // If no charges are available, tell the player to wait.
+        string shotInstructionText = _shotCharges > 0
+            ? "PRESS J TO SHOOT"
+            : "RECHARGING";
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            shotInstructionText,
+            new Vector2(700, 138),
+            2,
+            _shotCharges > 0
+                ? new Color(255, 214, 10)
+                : new Color(255, 80, 100)
+        );
     }
 
     private void DrawDrone()
@@ -1718,27 +1736,29 @@ public sealed class Game1 : Game
             return;
         }
 
+        if (_wasBotUsedThisRun)
+        {
+            return;
+        }
+
         if (_inputManager.IsKeyPressed(Keys.D1) ||
             _inputManager.IsKeyPressed(Keys.NumPad1))
         {
-            LogMlSample(GameBalanceLabel.TooEasy);
+            LogMlSample(GameBalanceLabel.TooEasy, "ManualHumanFeedback");
             _hasSavedMlFeedback = true;
         }
 
         if (_inputManager.IsKeyPressed(Keys.D2) ||
             _inputManager.IsKeyPressed(Keys.NumPad2))
         {
-            // NOTE:
-            // We show this as "Normal" to the player,
-            // but internally the ML label is still Balanced.
-            LogMlSample(GameBalanceLabel.Balanced);
+            LogMlSample(GameBalanceLabel.Balanced, "ManualHumanFeedback");
             _hasSavedMlFeedback = true;
         }
 
         if (_inputManager.IsKeyPressed(Keys.D3) ||
             _inputManager.IsKeyPressed(Keys.NumPad3))
         {
-            LogMlSample(GameBalanceLabel.TooHard);
+            LogMlSample(GameBalanceLabel.TooHard, "ManualHumanFeedback");
             _hasSavedMlFeedback = true;
         }
     }
@@ -1758,9 +1778,9 @@ public sealed class Game1 : Game
             return;
         }
 
-        GameBalanceLabel autoLabel = GetBotAutoFeedbackLabel();
+        BotAutoFeedbackResult result = GetBotAutoFeedbackResult();
 
-        LogMlSample(autoLabel);
+        LogMlSample(result.Label, result.Reason);
 
         _hasSavedMlFeedback = true;
     }
@@ -1769,7 +1789,10 @@ public sealed class Game1 : Game
     // Simple threshold-based label for bot-generated runs.
     // Survival time is the main signal.
     // Score is only used as a secondary signal after the bot survives long enough.
-    private GameBalanceLabel GetBotAutoFeedbackLabel()
+    //
+    // ML-3 CHANGE:
+    // This now returns both the label and the reason.
+    private BotAutoFeedbackResult GetBotAutoFeedbackResult()
     {
         float tooHardSeconds;
         float tooEasySeconds;
@@ -1802,27 +1825,55 @@ public sealed class Game1 : Game
 
         if (_survivalSeconds <= tooHardSeconds)
         {
-            return GameBalanceLabel.TooHard;
+            return new BotAutoFeedbackResult
+            {
+                Label = GameBalanceLabel.TooHard,
+                Reason = "ShortSurvival"
+            };
         }
 
         if (_survivalSeconds >= tooEasySeconds)
         {
-            return GameBalanceLabel.TooEasy;
+            return new BotAutoFeedbackResult
+            {
+                Label = GameBalanceLabel.TooEasy,
+                Reason = "LongSurvival"
+            };
         }
 
         if (_survivalSeconds >= minimumSecondsForScoreBasedTooEasy &&
             _scoreManager.Score >= tooEasyScore)
         {
-            return GameBalanceLabel.TooEasy;
+            return new BotAutoFeedbackResult
+            {
+                Label = GameBalanceLabel.TooEasy,
+                Reason = "HighScoreAfterLongSurvival"
+            };
         }
 
-        return GameBalanceLabel.Balanced;
+        return new BotAutoFeedbackResult
+        {
+            Label = GameBalanceLabel.Balanced,
+            Reason = "MiddleRange"
+        };
+    }
+
+    // ML-3 CHANGE:
+    // Small result object for bot auto-labeling.
+    // It stores both the label and the reason.
+    private sealed class BotAutoFeedbackResult
+    {
+        public GameBalanceLabel Label { get; init; }
+        public string Reason { get; init; } = "MiddleRange";
     }
 
     // ML-1 CHANGE:
     // Saves one run-level feedback row into CSV after Game Over.
     // This is better than logging during gameplay because the label describes the whole run.
-    private void LogMlSample(GameBalanceLabel label)
+    //
+    // ML-3 CHANGE:
+    // Adds ControlMode and AutoLabelReason to make the dataset easier to understand.
+    private void LogMlSample(GameBalanceLabel label, string autoLabelReason)
     {
         var sample = new GameplaySample
         {
@@ -1844,13 +1895,15 @@ public sealed class Game1 : Game
             ActiveShields = _lastActiveShields,
 
             Difficulty = _difficultySettings.Name,
+            ControlMode = _wasBotUsedThisRun ? "Bot" : "Human",
+            AutoLabelReason = autoLabelReason,
             Label = label.ToString()
         };
 
         bool saved = _gameplayDataLogger.Log(sample);
 
         Window.Title = saved
-            ? $"ML feedback saved: {label}"
+            ? $"ML feedback saved: {label} ({sample.ControlMode}, {autoLabelReason})"
             : "ML feedback failed - close CSV file";
     }
 }

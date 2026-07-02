@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 
 namespace DroneGameLocal;
 
@@ -9,12 +10,10 @@ namespace DroneGameLocal;
 //
 // ML-1 POLISH:
 // The CSV is saved inside the project folder instead of AppData.
-// This makes it easier to find, inspect, and use for ML training.
 //
-// BUG FIX:
-// CSV writing is now protected with try/catch.
-// If the CSV is open in Excel or locked by another app,
-// the game will not crash at Game Over.
+// ML-3 CHANGE:
+// If the CSV header is old, it creates a backup and starts a new CSV
+// with ControlMode and AutoLabelReason columns.
 public sealed class GameplayDataLogger
 {
     private readonly string _filePath;
@@ -30,10 +29,7 @@ public sealed class GameplayDataLogger
 
         _filePath = Path.Combine(folder, "gameplay-training-data.csv");
 
-        if (!File.Exists(_filePath))
-        {
-            File.WriteAllText(_filePath, GameplaySample.CsvHeader + Environment.NewLine);
-        }
+        EnsureCsvHasCorrectHeader();
     }
 
     public bool Log(GameplaySample sample)
@@ -64,6 +60,34 @@ public sealed class GameplayDataLogger
     public string GetLastError()
     {
         return _lastError;
+    }
+
+    private void EnsureCsvHasCorrectHeader()
+    {
+        if (!File.Exists(_filePath))
+        {
+            File.WriteAllText(_filePath, GameplaySample.CsvHeader + Environment.NewLine);
+            return;
+        }
+
+        string firstLine = File.ReadLines(_filePath).FirstOrDefault() ?? "";
+
+        if (firstLine == GameplaySample.CsvHeader)
+        {
+            return;
+        }
+
+        string folder = Path.GetDirectoryName(_filePath) ?? "";
+        string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+
+        string backupPath = Path.Combine(
+            folder,
+            $"gameplay-training-data-backup-{timestamp}.csv"
+        );
+
+        File.Copy(_filePath, backupPath, overwrite: true);
+
+        File.WriteAllText(_filePath, GameplaySample.CsvHeader + Environment.NewLine);
     }
 
     private static string FindProjectRoot()

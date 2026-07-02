@@ -3,9 +3,12 @@ using System.Globalization;
 namespace DroneGameLocal;
 
 // ML-1 CHANGE:
-// This class represents one row of gameplay training data.
-// Each row captures the current game state and a player-provided label.
-// Later, ML.NET can train a model using this data.
+// This class represents one row of gameplay data.
+// Each row records the current game state and the label chosen by the player or bot.
+//
+// ML-3 CHANGE:
+// ControlMode tells us whether the row came from a Human run or Bot run.
+// AutoLabelReason explains why the label was chosen.
 public sealed class GameplaySample
 {
     public float SurvivalSeconds { get; init; }
@@ -26,6 +29,16 @@ public sealed class GameplaySample
     public int ActiveShields { get; init; }
 
     public string Difficulty { get; init; } = "Normal";
+
+    // ML-3 CHANGE:
+    // Human or Bot.
+    public string ControlMode { get; init; } = "Human";
+
+    // ML-3 CHANGE:
+    // Explains why the label was chosen.
+    // Example: ManualHumanFeedback, ShortSurvival, LongSurvival, HighScore, MiddleRange.
+    public string AutoLabelReason { get; init; } = "ManualHumanFeedback";
+
     public string Label { get; init; } = "Balanced";
 
     public static string CsvHeader =>
@@ -33,25 +46,27 @@ public sealed class GameplaySample
         "ActiveObstacles,CurrentMaxObstacles,ObstaclePressure," +
         "ActiveEnemies,CurrentMaxEnemies,EnemyPressure," +
         "ActiveEnemyBullets,ActivePlayerShots,ShotCharges,ActiveShields," +
-        "Difficulty,Label";
+        "Difficulty,ControlMode,AutoLabelReason,Label";
 
     public string ToCsvRow()
     {
         return string.Join(",",
-            SurvivalSeconds.ToString(CultureInfo.InvariantCulture),
+            SurvivalSeconds.ToString("0.00", CultureInfo.InvariantCulture),
             Score,
             Lives,
             ActiveObstacles,
             CurrentMaxObstacles,
-            ObstaclePressure.ToString(CultureInfo.InvariantCulture),
+            ObstaclePressure.ToString("0.00", CultureInfo.InvariantCulture),
             ActiveEnemies,
             CurrentMaxEnemies,
-            EnemyPressure.ToString(CultureInfo.InvariantCulture),
+            EnemyPressure.ToString("0.00", CultureInfo.InvariantCulture),
             ActiveEnemyBullets,
             ActivePlayerShots,
             ShotCharges,
             ActiveShields,
             Difficulty,
+            ControlMode,
+            AutoLabelReason,
             Label
         );
     }
