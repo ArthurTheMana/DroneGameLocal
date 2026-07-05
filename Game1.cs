@@ -246,14 +246,21 @@ public sealed class Game1 : Game
 
     private void UpdateGameOverState(GameTime gameTime)
     {
-        // ML-2 CHANGE:
-        // If the bot was used, automatically save feedback.
-        // Human-only runs still ask the player to press F1/F2/F3.
+        // ML-2 POLISH:
+        // Bot runs are automatically labeled and saved.
         HandleBotAutoFeedback();
 
         // ML-1 CHANGE:
-        // After Game Over, ask human player to label the whole run.
+        // Human-only runs still ask the player to label the whole run.
         HandleGameOverFeedback();
+
+        // UI POLISH:
+        // After feedback is saved, allow the player to change difficulty
+        // before restarting the next run.
+        if (_hasSavedMlFeedback && !_isBotEnabled)
+        {
+            HandleGameOverDifficultySelection();
+        }
 
         if (_inputManager.IsKeyPressed(Keys.Enter) ||
             _inputManager.IsKeyPressed(Keys.Space))
@@ -325,6 +332,24 @@ public sealed class Game1 : Game
             $"Lives: {_gameState.Lives} | " +
             $"Best: {_scoreManager.HighScore} | " +
             $"Mode: {_difficultySettings.Name}";
+    }
+
+    // UI POLISH:
+    // Allows difficulty selection from the Game Over screen.
+    // We use A/D or Left/Right because 1/2/3 are already used for ML feedback.
+    private void HandleGameOverDifficultySelection()
+    {
+        if (_inputManager.IsKeyPressed(Keys.Left) ||
+            _inputManager.IsKeyPressed(Keys.A))
+        {
+            SelectPreviousDifficulty();
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.Right) ||
+            _inputManager.IsKeyPressed(Keys.D))
+        {
+            SelectNextDifficulty();
+        }
     }
 
     private void StartNewGame()
@@ -1175,12 +1200,37 @@ public sealed class Game1 : Game
                     : Color.White
             );
 
+            string restartText;
+
+            if (_hasSavedMlFeedback && !_isBotEnabled)
+            {
+                restartText = $"A D CHANGE MODE - CURRENT {_difficultySettings.Name}";
+            }
+            else if (_isBotEnabled)
+            {
+                restartText = "BOT MODE PICKS RANDOM";
+            }
+            else
+            {
+                restartText = "SAVE FEEDBACK FIRST";
+            }
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                restartText,
+                GameSettings.ScreenWidth,
+                355,
+                2,
+                Color.White
+            );
+
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
                 "PRESS ENTER TO RESTART",
                 GameSettings.ScreenWidth,
-                355,
+                390,
                 3,
                 new Color(0, 217, 255)
             );
@@ -1787,42 +1837,54 @@ public sealed class Game1 : Game
 
     // ML-2 POLISH:
     // Simple threshold-based label for bot-generated runs.
-    // Survival time is the main signal.
-    // Score is only used as a secondary signal after the bot survives long enough.
+    // Survival time and score are both used.
+    // This avoids calling a low-score death "Balanced".
     //
     // ML-3 CHANGE:
-    // This now returns both the label and the reason.
+    // This returns both the label and the reason.
     private BotAutoFeedbackResult GetBotAutoFeedbackResult()
     {
         float tooHardSeconds;
         float tooEasySeconds;
         float minimumSecondsForScoreBasedTooEasy;
+
+        int tooHardScore;
         int tooEasyScore;
 
         switch (_selectedDifficulty)
         {
             case DifficultyLevel.Easy:
-                tooHardSeconds = 35f;
-                tooEasySeconds = 130f;
-                minimumSecondsForScoreBasedTooEasy = 85f;
-                tooEasyScore = 1800;
+                // Easy should allow the bot to survive and score more.
+                tooHardSeconds = 45f;
+                tooHardScore = 550;
+
+                tooEasySeconds = 135f;
+                minimumSecondsForScoreBasedTooEasy = 90f;
+                tooEasyScore = 1900;
                 break;
 
             case DifficultyLevel.Hard:
-                tooHardSeconds = 25f;
-                tooEasySeconds = 90f;
-                minimumSecondsForScoreBasedTooEasy = 60f;
-                tooEasyScore = 1500;
+                // Hard is allowed to be shorter, but very low score is still TooHard.
+                tooHardSeconds = 32f;
+                tooHardScore = 450;
+
+                tooEasySeconds = 95f;
+                minimumSecondsForScoreBasedTooEasy = 65f;
+                tooEasyScore = 1600;
                 break;
 
             default:
-                tooHardSeconds = 30f;
-                tooEasySeconds = 105f;
-                minimumSecondsForScoreBasedTooEasy = 70f;
-                tooEasyScore = 1650;
+                // Normal should not call low-score runs Balanced.
+                tooHardSeconds = 40f;
+                tooHardScore = 600;
+
+                tooEasySeconds = 115f;
+                minimumSecondsForScoreBasedTooEasy = 75f;
+                tooEasyScore = 1750;
                 break;
         }
 
+        // Too hard if the bot dies too quickly.
         if (_survivalSeconds <= tooHardSeconds)
         {
             return new BotAutoFeedbackResult
@@ -1832,6 +1894,18 @@ public sealed class Game1 : Game
             };
         }
 
+        // Too hard if the bot survives a bit but still scores too low.
+        // Example: Normal mode, score 325 should not be Balanced.
+        if (_scoreManager.Score <= tooHardScore)
+        {
+            return new BotAutoFeedbackResult
+            {
+                Label = GameBalanceLabel.TooHard,
+                Reason = "LowScore"
+            };
+        }
+
+        // Too easy if survival is clearly long.
         if (_survivalSeconds >= tooEasySeconds)
         {
             return new BotAutoFeedbackResult
@@ -1841,6 +1915,8 @@ public sealed class Game1 : Game
             };
         }
 
+        // Too easy if score is high, but only after enough survival time.
+        // This prevents early score bursts from being labeled TooEasy.
         if (_survivalSeconds >= minimumSecondsForScoreBasedTooEasy &&
             _scoreManager.Score >= tooEasyScore)
         {
@@ -1854,7 +1930,7 @@ public sealed class Game1 : Game
         return new BotAutoFeedbackResult
         {
             Label = GameBalanceLabel.Balanced,
-            Reason = "MiddleRange"
+            Reason = "GoodSurvivalAndScore"
         };
     }
 
