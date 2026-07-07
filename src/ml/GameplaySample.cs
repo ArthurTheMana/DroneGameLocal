@@ -9,6 +9,10 @@ namespace DroneGameLocal;
 // ML-3 CHANGE:
 // ControlMode tells us whether the row came from a Human run or Bot run.
 // AutoLabelReason explains why the label was chosen.
+//
+// ML-4 CHANGE:
+// TimeRating and ScoreRating are stored separately.
+// This makes the dataset easier to understand and debug.
 public sealed class GameplaySample
 {
     public float SurvivalSeconds { get; init; }
@@ -29,16 +33,14 @@ public sealed class GameplaySample
     public int ActiveShields { get; init; }
 
     public string Difficulty { get; init; } = "Normal";
-
-    // ML-3 CHANGE:
-    // Human or Bot.
     public string ControlMode { get; init; } = "Human";
 
-    // ML-3 CHANGE:
-    // Explains why the label was chosen.
-    // Example: ManualHumanFeedback, ShortSurvival, LongSurvival, HighScore, MiddleRange.
-    public string AutoLabelReason { get; init; } = "ManualHumanFeedback";
+    // ML-4 CHANGE:
+    // Time-based rating and score-based rating are separated.
+    public string TimeRating { get; init; } = "Balanced";
+    public string ScoreRating { get; init; } = "Balanced";
 
+    public string AutoLabelReason { get; init; } = "ManualHumanFeedback";
     public string Label { get; init; } = "Balanced";
 
     public static string CsvHeader =>
@@ -46,7 +48,7 @@ public sealed class GameplaySample
         "ActiveObstacles,CurrentMaxObstacles,ObstaclePressure," +
         "ActiveEnemies,CurrentMaxEnemies,EnemyPressure," +
         "ActiveEnemyBullets,ActivePlayerShots,ShotCharges,ActiveShields," +
-        "Difficulty,ControlMode,AutoLabelReason,Label";
+        "Difficulty,ControlMode,TimeRating,ScoreRating,AutoLabelReason,Label";
 
     public string ToCsvRow()
     {
@@ -66,6 +68,8 @@ public sealed class GameplaySample
             ActiveShields,
             Difficulty,
             ControlMode,
+            TimeRating,
+            ScoreRating,
             AutoLabelReason,
             Label
         );
