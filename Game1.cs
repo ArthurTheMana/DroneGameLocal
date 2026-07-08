@@ -68,6 +68,12 @@ public sealed class Game1 : Game
     // Random generator for bot difficulty selection.
     private readonly System.Random _botRandom = new();
 
+    // ML-3 POLISH:
+    // Balanced random difficulty bag.
+    // This prevents the bot from randomly picking the same mode too many times.
+    // Every bag contains Easy, Normal, and Hard once.
+    private readonly List<DifficultyLevel> _botDifficultyBag = new();
+
     private readonly ObstacleSpawner _obstacleSpawner = new();
 
     // LEVEL 4A CHANGE:
@@ -412,19 +418,46 @@ public sealed class Game1 : Game
         _difficultySettings = DifficultySettings.Get(level);
     }
 
-    // ML-2 POLISH:
-    // Bot runs choose Easy, Normal, or Hard randomly.
-    // This creates more varied ML training data.
+    // ML-3 POLISH:
+    // Bot uses balanced random difficulty selection.
+    // Instead of pure 1/3 random every run, the bot uses a shuffled bag:
+    // Easy + Normal + Hard.
+    // This gives better ML data distribution.
     private void SelectRandomDifficultyForBotRun()
     {
-        DifficultyLevel randomDifficulty = _botRandom.Next(3) switch
+        if (_botDifficultyBag.Count == 0)
         {
-            0 => DifficultyLevel.Easy,
-            1 => DifficultyLevel.Normal,
-            _ => DifficultyLevel.Hard
-        };
+            RefillBotDifficultyBag();
+        }
 
-        SetDifficulty(randomDifficulty);
+        DifficultyLevel selectedDifficulty = _botDifficultyBag[^1];
+        _botDifficultyBag.RemoveAt(_botDifficultyBag.Count - 1);
+
+        SetDifficulty(selectedDifficulty);
+
+        Window.Title = $"BOT BALANCED MODE: {_difficultySettings.Name}";
+    }
+
+    // ML-2 POLISH:
+    // Refill and shuffle the bot difficulty bag.
+    // This keeps difficulty selection balanced but still random-looking.
+    private void RefillBotDifficultyBag()
+    {
+        _botDifficultyBag.Clear();
+
+        _botDifficultyBag.Add(DifficultyLevel.Easy);
+        _botDifficultyBag.Add(DifficultyLevel.Normal);
+        _botDifficultyBag.Add(DifficultyLevel.Hard);
+
+        // Fisher-Yates shuffle.
+        for (int i = _botDifficultyBag.Count - 1; i > 0; i--)
+        {
+            int j = _botRandom.Next(i + 1);
+
+            DifficultyLevel temp = _botDifficultyBag[i];
+            _botDifficultyBag[i] = _botDifficultyBag[j];
+            _botDifficultyBag[j] = temp;
+        }
     }
 
     private void SelectNextDifficulty()
