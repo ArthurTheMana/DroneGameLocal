@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -63,6 +64,14 @@ public sealed class Game1 : Game
     // the score should not be saved as BEST.
     // This keeps human high score fair.
     private bool _wasBotUsedThisRun;
+
+    // ML-5 CHANGE:
+    // Bot auto replay is used to collect ML data faster.
+    // When bot is ON, the game can restart automatically after Game Over.
+    private bool _isBotAutoReplayEnabled = true;
+    private float _botAutoReplayTimer = -1f;
+
+    private const float BotAutoReplayDelaySeconds = 2.0f;
 
     // ML-2 POLISH:
     // Random generator for bot difficulty selection.
@@ -178,6 +187,14 @@ public sealed class Game1 : Game
             }
         }
 
+        // ML-5 CHANGE:
+        // Press V to turn bot auto replay on/off.
+        // Useful when collecting data, but also lets you pause the data farm.
+        if (_inputManager.IsKeyPressed(Keys.V))
+        {
+            _isBotAutoReplayEnabled = !_isBotAutoReplayEnabled;
+        }
+
         if (_gameState.Current == GameStateType.Start)
         {
             UpdateStartState(gameTime);
@@ -252,6 +269,8 @@ public sealed class Game1 : Game
 
     private void UpdateGameOverState(GameTime gameTime)
     {
+        float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
         // ML-2 POLISH:
         // Bot runs are automatically labeled and saved.
         HandleBotAutoFeedback();
@@ -261,11 +280,33 @@ public sealed class Game1 : Game
         HandleGameOverFeedback();
 
         // UI POLISH:
-        // After feedback is saved, allow the player to change difficulty
+        // After feedback is saved, allow human player to change difficulty
         // before restarting the next run.
         if (_hasSavedMlFeedback && !_isBotEnabled)
         {
             HandleGameOverDifficultySelection();
+        }
+
+        // ML-5 CHANGE:
+        // If this was a bot run, feedback is saved, and auto replay is enabled,
+        // restart automatically after a short delay.
+        if (_wasBotUsedThisRun &&
+            _hasSavedMlFeedback &&
+            _isBotAutoReplayEnabled)
+        {
+            if (_botAutoReplayTimer < 0f)
+            {
+                _botAutoReplayTimer = BotAutoReplayDelaySeconds;
+            }
+
+            _botAutoReplayTimer -= deltaTime;
+
+            if (_botAutoReplayTimer <= 0f)
+            {
+                StartNewGame();
+                base.Update(gameTime);
+                return;
+            }
         }
 
         if (_inputManager.IsKeyPressed(Keys.Enter) ||
@@ -368,6 +409,10 @@ public sealed class Game1 : Game
         // ML-1 CHANGE:
         // Reset survival timer for the new run.
         _survivalSeconds = 0f;
+
+        // ML-5 CHANGE:
+        // Reset auto replay timer for the new run.
+        _botAutoReplayTimer = -1f;
 
         // ML-1 CHANGE:
         // Reset feedback flag for the new run.
@@ -1235,18 +1280,36 @@ public sealed class Game1 : Game
 
             string restartText;
 
-            if (_hasSavedMlFeedback && !_isBotEnabled)
+            if (_wasBotUsedThisRun && _isBotAutoReplayEnabled)
             {
-                restartText = $"A D CHANGE MODE - CURRENT {_difficultySettings.Name}";
+                float timer = _botAutoReplayTimer < 0f
+                    ? BotAutoReplayDelaySeconds
+                    : _botAutoReplayTimer;
+
+                restartText = $"AUTO RESTART IN {Math.Ceiling(timer)}";
             }
-            else if (_isBotEnabled)
+            else if (_wasBotUsedThisRun)
             {
-                restartText = "BOT MODE PICKS RANDOM";
+                restartText = "BOT AUTO REPLAY OFF";
+            }
+            else if (_hasSavedMlFeedback)
+            {
+                restartText = $"A D CHANGE MODE   CURRENT {_difficultySettings.Name}";
             }
             else
             {
                 restartText = "SAVE FEEDBACK FIRST";
             }
+
+            PixelText.DrawCenteredText(
+                _spriteBatch!,
+                _pixel!,
+                restartText,
+                GameSettings.ScreenWidth,
+                355,
+                2,
+                Color.White
+            );
 
             PixelText.DrawCenteredText(
                 _spriteBatch!,
