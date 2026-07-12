@@ -10,4 +10,11 @@
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.4.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The trainer project is separate. Do not compile it inside the game project. -->
+    <Compile Remove="tools\**\*.cs" />
+    <None Remove="tools\**\*" />
+    <Content Remove="tools\**\*" />
+  </ItemGroup>
+
 </Project>
