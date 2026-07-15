@@ -517,6 +517,19 @@ public sealed class Game1 : Game
         SetDifficulty(next);
     }
 
+    // ML-4 POLISH:
+    // Score should not create TooEasy by itself too early.
+    // The bot must survive long enough before high score can mean TooEasy.
+    private float GetMinimumSecondsForScoreBasedTooEasy()
+    {
+        return _selectedDifficulty switch
+        {
+            DifficultyLevel.Easy => 170f,
+            DifficultyLevel.Hard => 50f,
+            _ => 78f
+        };
+    }
+
     private void SelectPreviousDifficulty()
     {
         DifficultyLevel previous = _selectedDifficulty switch
@@ -1851,6 +1864,8 @@ public sealed class Game1 : Game
         _spriteBatch!.Draw(_pixel!, rectangle, color);
     }
 
+
+
     // ML-1 CHANGE:
     // Stores the latest gameplay state.
     // This snapshot is used when the player gives Game Over feedback.
@@ -1931,16 +1946,21 @@ public sealed class Game1 : Game
         _hasSavedMlFeedback = true;
     }
 
-    // ML-4 CHANGE:
-    // Bot auto-feedback now separates time rating and score rating.
+    // ML-4 POLISH:
+    // Bot auto-feedback separates time rating and score rating.
     // Final label is decided from both ratings.
+    //
+    // Rules:
+    // 1. Too short survival = TooHard.
+    // 2. Balanced survival but very low score = TooHard.
+    // 3. Very long survival = TooEasy.
+    // 4. High score only means TooEasy if survival time is also long enough.
+    // 5. Otherwise = Balanced.
     private BotAutoFeedbackResult GetBotAutoFeedbackResult()
     {
         GameBalanceLabel timeRating = GetTimeRating();
         GameBalanceLabel scoreRating = GetScoreRating();
 
-        // Time is the strongest signal.
-        // If the bot dies too soon, the run is TooHard.
         if (timeRating == GameBalanceLabel.TooHard)
         {
             return new BotAutoFeedbackResult
@@ -1952,7 +1972,18 @@ public sealed class Game1 : Game
             };
         }
 
-        // If the bot survives too long, the run is TooEasy.
+        if (scoreRating == GameBalanceLabel.TooHard &&
+            timeRating != GameBalanceLabel.TooEasy)
+        {
+            return new BotAutoFeedbackResult
+            {
+                Label = GameBalanceLabel.TooHard,
+                TimeRating = timeRating,
+                ScoreRating = scoreRating,
+                Reason = "LowScoreAfterOkaySurvival"
+            };
+        }
+
         if (timeRating == GameBalanceLabel.TooEasy)
         {
             return new BotAutoFeedbackResult
@@ -1964,29 +1995,18 @@ public sealed class Game1 : Game
             };
         }
 
-        // If survival is okay but score is very low,
-        // the bot probably struggled to clear threats.
-        if (scoreRating == GameBalanceLabel.TooHard)
-        {
-            return new BotAutoFeedbackResult
-            {
-                Label = GameBalanceLabel.TooHard,
-                TimeRating = timeRating,
-                ScoreRating = scoreRating,
-                Reason = "LowScoreAfterOkaySurvival"
-            };
-        }
+        float minimumSecondsForHighScore =
+            GetMinimumSecondsForScoreBasedTooEasy();
 
-        // If survival is okay but score is very high,
-        // the run may be too easy for the bot.
-        if (scoreRating == GameBalanceLabel.TooEasy)
+        if (scoreRating == GameBalanceLabel.TooEasy &&
+            _survivalSeconds >= minimumSecondsForHighScore)
         {
             return new BotAutoFeedbackResult
             {
                 Label = GameBalanceLabel.TooEasy,
                 TimeRating = timeRating,
                 ScoreRating = scoreRating,
-                Reason = "HighScoreAfterOkaySurvival"
+                Reason = "HighScoreAfterEnoughSurvival"
             };
         }
 
@@ -2063,6 +2083,9 @@ public sealed class Game1 : Game
     // ML-4 CHANGE:
     // Time rating only looks at survival time.
     // It does not care about score.
+    // ML-4 POLISH:
+    // Time rating only looks at survival time.
+    // It does not care about score.
     private GameBalanceLabel GetTimeRating()
     {
         float tooHardSeconds;
@@ -2071,18 +2094,18 @@ public sealed class Game1 : Game
         switch (_selectedDifficulty)
         {
             case DifficultyLevel.Easy:
-                tooHardSeconds = 45f;
-                tooEasySeconds = 135f;
+                tooHardSeconds = 115f;
+                tooEasySeconds = 180f;
                 break;
 
             case DifficultyLevel.Hard:
-                tooHardSeconds = 32f;
-                tooEasySeconds = 95f;
+                tooHardSeconds = 33f;
+                tooEasySeconds = 50f;
                 break;
 
             default:
-                tooHardSeconds = 40f;
-                tooEasySeconds = 115f;
+                tooHardSeconds = 55f;
+                tooEasySeconds = 85f;
                 break;
         }
 
@@ -2102,6 +2125,9 @@ public sealed class Game1 : Game
     // ML-4 CHANGE:
     // Score rating only looks at score.
     // It does not care about survival time.
+    // ML-4 POLISH:
+    // Score rating only looks at score.
+    // It does not care about survival time.
     private GameBalanceLabel GetScoreRating()
     {
         int tooHardScore;
@@ -2110,18 +2136,18 @@ public sealed class Game1 : Game
         switch (_selectedDifficulty)
         {
             case DifficultyLevel.Easy:
-                tooHardScore = 550;
-                tooEasyScore = 1900;
+                tooHardScore = 1450;
+                tooEasyScore = 2600;
                 break;
 
             case DifficultyLevel.Hard:
-                tooHardScore = 450;
-                tooEasyScore = 1600;
+                tooHardScore = 620;
+                tooEasyScore = 1200;
                 break;
 
             default:
-                tooHardScore = 600;
-                tooEasyScore = 1750;
+                tooHardScore = 850;
+                tooEasyScore = 1550;
                 break;
         }
 
