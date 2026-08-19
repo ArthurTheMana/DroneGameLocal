@@ -130,6 +130,17 @@ public sealed class Game1 : Game
 
     private readonly System.Random _visualRandom = new();
 
+    // ML-6 CHANGE:
+    // The trained ML model is loaded into the game.
+    // For now, it only displays prediction in HUD.
+    // It does not control difficulty yet.
+    private readonly GameBalancePredictor _balancePredictor = new();
+
+    private string _mlPredictionText = "ML READY";
+    private float _mlPredictionTimer;
+
+    private const float MlPredictionRefreshSeconds = 2.0f;
+
     public Game1()
     {
         _graphics = new GraphicsDeviceManager(this);
@@ -2017,6 +2028,52 @@ public sealed class Game1 : Game
             ScoreRating = scoreRating,
             Reason = "BalancedTimeAndScore"
         };
+    }
+
+    // ML-6 CHANGE:
+    // Predict current game difficulty feeling every few seconds.
+    // This is only shown in HUD for now.
+    private void UpdateMlPrediction(float deltaTime)
+    {
+        if (!_balancePredictor.IsLoaded)
+        {
+            _mlPredictionText = "NO MODEL";
+            return;
+        }
+
+        _mlPredictionTimer -= deltaTime;
+
+        if (_mlPredictionTimer > 0f)
+        {
+            return;
+        }
+
+        _mlPredictionTimer = MlPredictionRefreshSeconds;
+
+        var input = new GameBalanceModelInput
+        {
+            SurvivalSeconds = _survivalSeconds,
+            Score = _scoreManager.Score,
+            Lives = _gameState.Lives,
+
+            ActiveObstacles = _obstacles.Count,
+            CurrentMaxObstacles = _obstacleSpawner.CurrentMaxObstacles,
+            ObstaclePressure = _obstacleSpawner.ProgressPercent,
+
+            ActiveEnemies = _enemies.Count,
+            CurrentMaxEnemies = _enemySpawner.CurrentMaxEnemies,
+            EnemyPressure = _enemySpawner.ProgressPercent,
+
+            ActiveEnemyBullets = _enemyBullets.Count,
+            ActivePlayerShots = _shots.Count,
+            ShotCharges = _shotCharges,
+            ActiveShields = _shields.Count,
+
+            Difficulty = _difficultySettings.Name,
+            ControlMode = _isBotEnabled ? "Bot" : "Human"
+        };
+
+        _mlPredictionText = _balancePredictor.Predict(input);
     }
 
     // ML-3 CHANGE:
