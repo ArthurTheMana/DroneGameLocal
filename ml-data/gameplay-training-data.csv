@@ -4915,3 +4915,8 @@ SurvivalSeconds,Score,Lives,ActiveObstacles,CurrentMaxObstacles,ObstaclePressure
 218.99,4330,0,1,7,1,0,2,1,0,0,2,0,Easy,Human,TooEasy,TooEasy,ManualHumanFeedback,TooEasy
 32.75,825,0,2,9,0.37,0,3,0.45,1,0,1,0,Hard,Human,TooHard,Balanced,ManualHumanFeedback,TooHard
 71.85,1160,0,2,5,0.59,1,1,0.64,0,0,3,0,Easy,Human,TooHard,TooHard,ManualHumanFeedback,TooHard
+62.57,1290,0,2,8,0.62,1,3,0.72,1,0,2,0,Normal,Human,Balanced,Balanced,ManualHumanFeedback,Balanced
+17.43,250,0,3,5,0.16,0,2,0.19,1,0,1,0,Normal,Human,TooHard,TooHard,ManualHumanFeedback,TooHard
+14.17,200,0,3,5,0.13,0,1,0.15,0,0,0,0,Normal,Human,TooHard,TooHard,ManualHumanFeedback,TooHard
+16.07,205,0,1,5,0.15,1,2,0.18,0,0,0,0,Normal,Human,TooHard,TooHard,ManualHumanFeedback,TooHard
+48.00,925,0,2,7,0.47,1,3,0.55,0,0,2,0,Normal,Human,TooHard,Balanced,ManualHumanFeedback,TooHard

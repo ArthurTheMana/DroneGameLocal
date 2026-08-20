@@ -52,6 +52,11 @@ public sealed class GameBalancePredictor
         {
             LastError = ex.Message;
             IsLoaded = false;
+
+            // ML-6 DEBUG:
+            // Show model loading errors in the terminal.
+            System.Console.WriteLine("ML model failed to load:");
+            System.Console.WriteLine(ex.Message);
         }
     }
 

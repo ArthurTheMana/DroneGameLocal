@@ -24,4 +24,10 @@ public sealed class GameBalanceModelInput
 
     public string Difficulty { get; set; } = "Normal";
     public string ControlMode { get; set; } = "Human";
+
+    // ML-6 FIX:
+    // The trained pipeline includes a Label column because it was used during training.
+    // During live prediction, we do not know the real label yet,
+    // so we provide a dummy value to satisfy the model schema.
+    public string Label { get; set; } = "Balanced";
 }

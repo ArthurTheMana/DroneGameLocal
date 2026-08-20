@@ -377,6 +377,10 @@ public sealed class Game1 : Game
         UpdateShots(deltaTime);
         UpdateEnemyBullets(deltaTime);
 
+        // ML-6 CHANGE:
+        // Update ML prediction while playing.
+        UpdateMlPrediction(deltaTime);
+
         CheckShotHits();
 
         // ML-1 CHANGE:
@@ -1418,7 +1422,7 @@ public sealed class Game1 : Game
         // UI POLISH:
         // Taller HUD so text does not overlap.
         DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, 150),
+            new Rectangle(0, 0, GameSettings.ScreenWidth, 190),
             new Color(0, 0, 0, 145)
         );
 
@@ -1545,6 +1549,18 @@ public sealed class Game1 : Game
             new Color(0, 217, 255)
         );
 
+        // ML-6 CHANGE:
+        // Show ML model prediction in the HUD.
+        // This is a preview/debug display only.
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"ML {FormatMlPredictionText()}",
+            new Vector2(700, 160),
+            2,
+            GetMlPredictionColor()
+        );
+
         float rechargeProgress = _shotCharges >= GameSettings.MaxShotCharges
             ? 1f
             : MathHelper.Clamp(
@@ -1578,6 +1594,36 @@ public sealed class Game1 : Game
                 ? new Color(255, 214, 10)
                 : new Color(255, 80, 100)
         );
+    }
+
+    // ML-6 CHANGE:
+    // Color-code ML prediction for readability.
+    private Color GetMlPredictionColor()
+    {
+        return _mlPredictionText switch
+        {
+            "TooHard" => new Color(255, 80, 100),
+            "TooEasy" => new Color(255, 214, 10),
+            "Balanced" => new Color(0, 217, 255),
+            _ => Color.White
+        };
+    }
+
+    // ML-6 POLISH:
+    // Make ML labels easier to read in the HUD.
+    // Internal model labels stay as TooHard / TooEasy / Balanced.
+    private string FormatMlPredictionText()
+    {
+        return _mlPredictionText switch
+        {
+            "TooHard" => "TOO HARD",
+            "TooEasy" => "TOO EASY",
+            "Balanced" => "BALANCED",
+            "NO MODEL" => "NO MODEL",
+            "UNKNOWN" => "UNKNOWN",
+            "ERROR" => "ERROR",
+            _ => _mlPredictionText.ToUpperInvariant()
+        };
     }
 
     private void DrawDrone()
@@ -2038,6 +2084,11 @@ public sealed class Game1 : Game
         if (!_balancePredictor.IsLoaded)
         {
             _mlPredictionText = "NO MODEL";
+
+            Window.Title = string.IsNullOrWhiteSpace(_balancePredictor.LastError)
+                ? "ML model not loaded"
+                : $"ML model not loaded: {_balancePredictor.LastError}";
+
             return;
         }
 
