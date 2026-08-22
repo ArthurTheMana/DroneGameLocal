@@ -137,7 +137,15 @@ public sealed class Game1 : Game
     private readonly GameBalancePredictor _balancePredictor = new();
 
     private string _mlPredictionText = "ML READY";
+
+    // ML-7 CHANGE:
+    // Confidence value from the ML model.
+    // 0.0 = not confident, 1.0 = very confident.
+    private float _mlPredictionConfidence;
+
     private float _mlPredictionTimer;
+
+    private const float MlPredictionRefreshSeconds = 2.0f;
 
     private const float MlPredictionRefreshSeconds = 2.0f;
 
@@ -1549,13 +1557,17 @@ public sealed class Game1 : Game
             new Color(0, 217, 255)
         );
 
-        // ML-6 CHANGE:
-        // Show ML model prediction in the HUD.
-        // This is a preview/debug display only.
+        // ML-7 CHANGE:
+        // Show ML prediction with confidence.
+        // Example: ML TOO HARD 82%
+        string mlHudText = string.IsNullOrWhiteSpace(FormatMlConfidenceText())
+            ? $"ML {FormatMlPredictionText()}"
+            : $"ML {FormatMlPredictionText()} {FormatMlConfidenceText()}";
+
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            $"ML {FormatMlPredictionText()}",
+            mlHudText,
             new Vector2(700, 160),
             2,
             GetMlPredictionColor()
@@ -1609,21 +1621,18 @@ public sealed class Game1 : Game
         };
     }
 
-    // ML-6 POLISH:
-    // Make ML labels easier to read in the HUD.
-    // Internal model labels stay as TooHard / TooEasy / Balanced.
-    private string FormatMlPredictionText()
+    // ML-7 CHANGE:
+    // Convert model confidence from 0.0-1.0 to percentage text.
+    private string FormatMlConfidenceText()
     {
-        return _mlPredictionText switch
+        if (_mlPredictionConfidence <= 0f)
         {
-            "TooHard" => "TOO HARD",
-            "TooEasy" => "TOO EASY",
-            "Balanced" => "BALANCED",
-            "NO MODEL" => "NO MODEL",
-            "UNKNOWN" => "UNKNOWN",
-            "ERROR" => "ERROR",
-            _ => _mlPredictionText.ToUpperInvariant()
-        };
+            return "";
+        }
+
+        int percent = (int)Math.Round(_mlPredictionConfidence * 100f);
+
+        return $"{percent}%";
     }
 
     private void DrawDrone()
@@ -2079,11 +2088,15 @@ public sealed class Game1 : Game
     // ML-6 CHANGE:
     // Predict current game difficulty feeling every few seconds.
     // This is only shown in HUD for now.
+    //
+    // ML-7 CHANGE:
+    // Also stores confidence percentage.
     private void UpdateMlPrediction(float deltaTime)
     {
         if (!_balancePredictor.IsLoaded)
         {
             _mlPredictionText = "NO MODEL";
+            _mlPredictionConfidence = 0f;
 
             Window.Title = string.IsNullOrWhiteSpace(_balancePredictor.LastError)
                 ? "ML model not loaded"
@@ -2121,10 +2134,31 @@ public sealed class Game1 : Game
             ActiveShields = _shields.Count,
 
             Difficulty = _difficultySettings.Name,
-            ControlMode = _isBotEnabled ? "Bot" : "Human"
+            ControlMode = _isBotEnabled ? "Bot" : "Human",
+
+            // ML-6 FIX:
+            // Dummy label needed because the trained pipeline expects a Label column.
+            Label = "Balanced"
         };
 
-        _mlPredictionText = _balancePredictor.Predict(input);
+        GameBalancePredictionResult result = _balancePredictor.Predict(input);
+
+        _mlPredictionText = result.Label;
+        _mlPredictionConfidence = result.Confidence;
+    }
+
+    // ML-7 CHANGE:
+    // Convert model confidence from 0.0-1.0 to percentage text.
+    private string FormatMlConfidenceText()
+    {
+        if (_mlPredictionConfidence <= 0f)
+        {
+            return "";
+        }
+
+        int percent = (int)Math.Round(_mlPredictionConfidence * 100f);
+
+        return $"{percent}%";
     }
 
     // ML-3 CHANGE:
