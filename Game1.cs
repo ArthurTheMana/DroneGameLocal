@@ -147,8 +147,6 @@ public sealed class Game1 : Game
 
     private const float MlPredictionRefreshSeconds = 2.0f;
 
-    private const float MlPredictionRefreshSeconds = 2.0f;
-
     public Game1()
     {
         _graphics = new GraphicsDeviceManager(this);
@@ -1608,6 +1606,23 @@ public sealed class Game1 : Game
         );
     }
 
+    // ML-6 POLISH:
+    // Make ML labels easier to read in the HUD.
+    // Internal model labels stay as TooHard / TooEasy / Balanced.
+    private string FormatMlPredictionText()
+    {
+        return _mlPredictionText switch
+        {
+            "TooHard" => "TOO HARD",
+            "TooEasy" => "TOO EASY",
+            "Balanced" => "BALANCED",
+            "NO MODEL" => "NO MODEL",
+            "UNKNOWN" => "UNKNOWN",
+            "ERROR" => "ERROR",
+            _ => _mlPredictionText.ToUpperInvariant()
+        };
+    }
+
     // ML-6 CHANGE:
     // Color-code ML prediction for readability.
     private Color GetMlPredictionColor()
@@ -1619,20 +1634,6 @@ public sealed class Game1 : Game
             "Balanced" => new Color(0, 217, 255),
             _ => Color.White
         };
-    }
-
-    // ML-7 CHANGE:
-    // Convert model confidence from 0.0-1.0 to percentage text.
-    private string FormatMlConfidenceText()
-    {
-        if (_mlPredictionConfidence <= 0f)
-        {
-            return "";
-        }
-
-        int percent = (int)Math.Round(_mlPredictionConfidence * 100f);
-
-        return $"{percent}%";
     }
 
     private void DrawDrone()
