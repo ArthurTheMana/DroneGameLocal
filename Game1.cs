@@ -2150,17 +2150,18 @@ public sealed class Game1 : Game
         _mlPredictionConfidence = result.Confidence;
 
         // ML-7 POLISH:
-        // Do not display TooEasy when the player is under pressure
-        // and shot resources are not fully ready.
-        // This makes the HUD prediction feel more realistic.
-        if (_mlPredictionText == "TooEasy" &&
-            ShouldBlockTooEasyPrediction())
+        // If live gameplay looks fair and manageable,
+        // show Balanced even if the model leans TooHard / TooEasy.
+        // This makes the HUD more useful during active play.
+        if (ShouldShowLiveBalancedPrediction())
         {
             _mlPredictionText = "Balanced";
 
-            // Lower confidence because this is a guarded correction.
-            _mlPredictionConfidence = Math.Min(_mlPredictionConfidence, 0.65f);
+            // Keep confidence reasonable because this is a live correction.
+            _mlPredictionConfidence = Math.Min(_mlPredictionConfidence, 0.78f);
         }
+
+
     }
 
     // ML-7 POLISH:
@@ -2202,6 +2203,37 @@ public sealed class Game1 : Game
         int percent = (int)Math.Round(_mlPredictionConfidence * 100f);
 
         return $"{percent}%";
+    }
+
+    // ML-7 POLISH:
+    // Live gameplay can be different from Game Over training rows.
+    // If the current game state looks playable and fair,
+    // show BALANCED instead of forcing TooHard / TooEasy.
+    private bool ShouldShowLiveBalancedPrediction()
+    {
+        bool playerStillAlive =
+            _gameState.Lives > 0;
+
+        bool pressureIsMedium =
+            _obstacleSpawner.ProgressPercent >= 0.30f &&
+            _obstacleSpawner.ProgressPercent <= 0.85f &&
+            _enemySpawner.ProgressPercent >= 0.30f &&
+            _enemySpawner.ProgressPercent <= 0.85f;
+
+        bool hasSomeShotResource =
+            _shotCharges >= 1;
+
+        bool bulletPressureManageable =
+            _enemyBullets.Count <= 3;
+
+        bool enemyPressureManageable =
+            _enemies.Count <= _enemySpawner.CurrentMaxEnemies;
+
+        return playerStillAlive &&
+               pressureIsMedium &&
+               hasSomeShotResource &&
+               bulletPressureManageable &&
+               enemyPressureManageable;
     }
 
     // ML-3 CHANGE:
@@ -2348,5 +2380,7 @@ public sealed class Game1 : Game
 
         return GameBalanceLabel.Balanced;
     }
+
+
 
 }

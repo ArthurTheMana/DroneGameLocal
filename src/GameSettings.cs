@@ -53,5 +53,9 @@ public static class GameSettings
     public const float SniperAimSeconds = 0.85f;
     public const float SniperRetreatSpeedMultiplier = 1.55f;
 
+    // UI POLISH:
+    // The player should not move into the top HUD area.
+    public const int PlayAreaTop = 190;
+
 
 }

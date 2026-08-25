@@ -33,7 +33,7 @@ public sealed class BotPlayer
     // but it now moves much more than before.
     private const float PatrolMinX = 60f;
     private const float PatrolMaxX = 330f;
-    private const float PatrolMinY = 165f;
+    private const float PatrolMinY = GameSettings.PlayAreaTop + 20f;
     private const float PatrolMaxY = 535f;
 
     private const float PatrolTargetReachDistance = 34f;

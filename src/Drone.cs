@@ -29,10 +29,10 @@ public sealed class Drone {
 
     public void ClampToScreen(int screenWidth, int screenHeight)
     {
-        float x = MathHelper.Clamp(Position.X, 0, screenWidth - Width);
-        float y = MathHelper.Clamp(Position.Y, 0, screenHeight - Height);
-
-        Position = new Vector2(x, y);
+        Position = new Vector2(
+            MathHelper.Clamp(Position.X, 0, screenWidth - Width),
+            MathHelper.Clamp(Position.Y, GameSettings.PlayAreaTop, screenHeight - Height)
+        );
     }
 
     public Rectangle GetBounds()
