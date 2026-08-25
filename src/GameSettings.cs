@@ -2,8 +2,8 @@ namespace DroneGameLocal;
 
 public static class GameSettings
 {
-    public const int ScreenWidth = 900;
-    public const int ScreenHeight = 600;
+    public const int ScreenWidth = 1600;
+    public const int ScreenHeight = 900;
 
     public const int StartDroneX = 100;
     public const int StartDroneY = 280;
@@ -54,8 +54,12 @@ public static class GameSettings
     public const float SniperRetreatSpeedMultiplier = 1.55f;
 
     // UI POLISH:
-    // The player should not move into the top HUD area.
-    public const int PlayAreaTop = 190;
+    // Compact top HUD height.
+    public const int HudHeight = 145;
+
+    // UI POLISH:
+    // Player and bot cannot move into the HUD area.
+    public const int PlayAreaTop = HudHeight + 20;
 
 
 }

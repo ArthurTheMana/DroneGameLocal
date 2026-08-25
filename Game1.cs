@@ -1167,100 +1167,7 @@ public sealed class Game1 : Game
 
         if (_gameState.Current == GameStateType.Start)
         {
-            DrawStartPanel(new Color(30, 70, 120, 210));
-
-
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "DRONE GAME",
-                GameSettings.ScreenWidth,
-                150,
-                5,
-                Color.White
-            );
-
-            string modeText = _isBotEnabled
-                ? "BOT MODE RANDOM"
-                : $"MODE {_difficultySettings.Name}";
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                modeText,
-                GameSettings.ScreenWidth,
-                215,
-                4,
-                new Color(255, 214, 10)
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "A D OR LEFT RIGHT TO CHANGE",
-                GameSettings.ScreenWidth,
-                270,
-                2,
-                new Color(0, 217, 255)
-            );
-
-            // ML-2 POLISH:
-            // In human mode, show manual difficulty selection.
-            // In bot mode, show that the bot will choose difficulty randomly.
-            string difficultyHelpText = _isBotEnabled
-                ? "BOT WILL PICK EASY NORMAL OR HARD"
-                : "1 EASY  2 NORMAL  3 HARD";
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                difficultyHelpText,
-                GameSettings.ScreenWidth,
-                300,
-                2,
-                Color.White
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "PRESS B TO TOGGLE BOT",
-                GameSettings.ScreenWidth,
-                440,
-                2,
-                new Color(0, 217, 255)
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "ENTER TO START",
-                GameSettings.ScreenWidth,
-                335,
-                3,
-                new Color(0, 217, 255)
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "CHARGES AUTO BUILD PRESS J",
-                GameSettings.ScreenWidth,
-                380,
-                2,
-                new Color(255, 214, 10)
-            );
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                "ENDLESS SCORE MODE",
-                GameSettings.ScreenWidth,
-                410,
-                2,
-                Color.White
-            );
+                DrawStartMenuOverlay();
         }
 
         if (_gameState.Current == GameStateType.Fail)
@@ -1404,42 +1311,159 @@ public sealed class Game1 : Game
         }
     }
 
+    // UI POLISH:
+    // Dynamic start menu layout.
+    // Text positions are calculated from screen size,
+    // so the menu still looks correct when ScreenWidth/ScreenHeight changes.
+    private void DrawStartMenuOverlay()
+    {
+        int menuWidth = Math.Min(820, GameSettings.ScreenWidth - 500);
+        int menuHeight = 360;
+
+        Rectangle menuBox = new Rectangle(
+            GameSettings.ScreenWidth / 2 - menuWidth / 2,
+            GameSettings.PlayAreaTop + 70,
+            menuWidth,
+            menuHeight
+        );
+
+        DrawRect(
+            menuBox,
+            new Color(30, 70, 120, 220)
+        );
+
+        int currentY = menuBox.Y + 32;
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            "DRONE GAME",
+            GameSettings.ScreenWidth,
+            currentY,
+            4,
+            Color.White
+        );
+
+        currentY += 52;
+
+        string modeText = _isBotEnabled
+            ? "BOT MODE RANDOM"
+            : $"MODE {_difficultySettings.Name.ToUpper()}";
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            modeText,
+            GameSettings.ScreenWidth,
+            currentY,
+            3,
+            new Color(255, 214, 10)
+        );
+
+        currentY += 46;
+
+        string changeText = _isBotEnabled
+            ? "BOT WILL PICK EASY NORMAL OR HARD"
+            : "A D OR LEFT RIGHT TO CHANGE";
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            changeText,
+            GameSettings.ScreenWidth,
+            currentY,
+            2,
+            new Color(0, 217, 255)
+        );
+
+        currentY += 34;
+
+        string difficultyHelpText = _isBotEnabled
+            ? "RANDOM DIFFICULTY EACH RUN"
+            : "1 EASY   2 NORMAL   3 HARD";
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            difficultyHelpText,
+            GameSettings.ScreenWidth,
+            currentY,
+            2,
+            Color.White
+        );
+
+        currentY += 50;
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            "ENTER TO START",
+            GameSettings.ScreenWidth,
+            currentY,
+            3,
+            new Color(0, 217, 255)
+        );
+
+        currentY += 46;
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            "CHARGES AUTO BUILD PRESS J",
+            GameSettings.ScreenWidth,
+            currentY,
+            2,
+            new Color(255, 214, 10)
+        );
+
+        currentY += 32;
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            "ENDLESS SCORE MODE",
+            GameSettings.ScreenWidth,
+            currentY,
+            2,
+            Color.White
+        );
+
+        currentY += 32;
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            "PRESS B TO TOGGLE BOT",
+            GameSettings.ScreenWidth,
+            currentY,
+            2,
+            new Color(0, 217, 255)
+        );
+    }
+
     private void DrawBackground()
     {
-        _starfield.Draw(_spriteBatch!, _pixel!);
-
-        for (int y = 0; y < GameSettings.ScreenHeight; y += 60)
-        {
-            DrawRect(
-                new Rectangle(0, y, GameSettings.ScreenWidth, 2),
-                new Color(255, 255, 255, 18)
-            );
-        }
-
-        for (int x = 0; x < GameSettings.ScreenWidth; x += 90)
-        {
-            DrawRect(
-                new Rectangle(x, 0, 2, GameSettings.ScreenHeight),
-                new Color(255, 255, 255, 12)
-            );
-        }
+            _starfield.Draw(_spriteBatch!, _pixel!);
     }
 
     private void DrawHud()
     {
-        // UI POLISH:
-        // Taller HUD so text does not overlap.
         DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, 190),
-            new Color(0, 0, 0, 145)
+            new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.HudHeight),
+            new Color(0, 0, 0, 165)
         );
 
-        // LEFT SIDE: score and game pressure numbers.
+        int leftX = 28;
+        int centerX = GameSettings.ScreenWidth / 2 - 260;
+        int rightX = GameSettings.ScreenWidth - 380;
+        int topY = 22;
+
+        // LEFT SIDE
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"SCORE {_scoreManager.Score}",
-            new Vector2(24, 18),
+            new Vector2(leftX, topY),
             3,
             Color.White
         );
@@ -1448,7 +1472,7 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"MODE {_difficultySettings.Name}",
-            new Vector2(24, 54),
+            new Vector2(leftX, topY + 42),
             2,
             Color.White
         );
@@ -1457,7 +1481,7 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"OBSTACLES {_obstacleSpawner.CurrentMaxObstacles}/{_difficultySettings.MaxObstacles}",
-            new Vector2(24, 84),
+            new Vector2(leftX, topY + 74),
             2,
             new Color(255, 214, 10)
         );
@@ -1466,17 +1490,17 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"ENEMIES {_enemySpawner.CurrentMaxEnemies}/{_difficultySettings.MaxEnemies}",
-            new Vector2(24, 112),
+            new Vector2(leftX, topY + 106),
             2,
             new Color(255, 140, 40)
         );
 
-        // CENTER: lives and pressure bars.
+        // CENTER SIDE
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"LIVES {_gameState.Lives}",
-            new Vector2(360, 18),
+            new Vector2(GameSettings.ScreenWidth / 2 - 90, topY),
             3,
             new Color(0, 217, 255)
         );
@@ -1485,16 +1509,16 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             "OBSTACLE PRESSURE",
-            new Vector2(330, 62),
+            new Vector2(centerX, topY + 58),
             2,
             new Color(255, 214, 10)
         );
 
         DrawProgressBar(
-            x: 330,
-            y: 84,
-            width: 330,
-            height: 16,
+            x: centerX,
+            y: topY + 86,
+            width: 360,
+            height: 14,
             progress: _obstacleSpawner.ProgressPercent
         );
 
@@ -1502,25 +1526,25 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             "ENEMY PRESSURE",
-            new Vector2(330, 108),
+            new Vector2(centerX, topY + 108),
             2,
             new Color(255, 140, 40)
         );
 
         DrawProgressBar(
-            x: 330,
-            y: 130,
-            width: 330,
-            height: 16,
+            x: centerX,
+            y: topY + 136,
+            width: 360,
+            height: 14,
             progress: _enemySpawner.ProgressPercent
         );
 
-        // RIGHT SIDE: best, bot, and shot status.
+        // RIGHT SIDE
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"BEST {_scoreManager.HighScore}",
-            new Vector2(700, 18),
+            new Vector2(rightX, topY),
             2,
             new Color(255, 214, 10)
         );
@@ -1529,48 +1553,20 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             _isBotEnabled ? "BOT ON" : "BOT OFF",
-            new Vector2(700, 44),
+            new Vector2(rightX, topY + 32),
             2,
             _isBotEnabled
                 ? new Color(0, 217, 255)
                 : Color.White
         );
 
-        if (_wasBotUsedThisRun)
-        {
-            PixelText.DrawText(
-                _spriteBatch!,
-                _pixel!,
-                "NO BEST",
-                new Vector2(700, 70),
-                2,
-                new Color(255, 80, 100)
-            );
-        }
-
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"SHOT {_shotCharges}/{GameSettings.MaxShotCharges}",
-            new Vector2(700, 96),
+            new Vector2(rightX, topY + 70),
             2,
             new Color(0, 217, 255)
-        );
-
-        // ML-7 CHANGE:
-        // Show ML prediction with confidence.
-        // Example: ML TOO HARD 82%
-        string mlHudText = string.IsNullOrWhiteSpace(FormatMlConfidenceText())
-            ? $"ML {FormatMlPredictionText()}"
-            : $"ML {FormatMlPredictionText()} {FormatMlConfidenceText()}";
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            mlHudText,
-            new Vector2(700, 160),
-            2,
-            GetMlPredictionColor()
         );
 
         float rechargeProgress = _shotCharges >= GameSettings.MaxShotCharges
@@ -1582,16 +1578,13 @@ public sealed class Game1 : Game
             );
 
         DrawProgressBar(
-            x: 700,
-            y: 120,
-            width: 160,
+            x: rightX,
+            y: topY + 100,
+            width: 260,
             height: 14,
             progress: rechargeProgress
         );
 
-        // UI POLISH:
-        // Show shot instruction/status under the charge bar.
-        // If no charges are available, tell the player to wait.
         string shotInstructionText = _shotCharges > 0
             ? "PRESS J TO SHOOT"
             : "RECHARGING";
@@ -1600,11 +1593,24 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             shotInstructionText,
-            new Vector2(700, 138),
+            new Vector2(rightX, topY + 124),
             2,
             _shotCharges > 0
                 ? new Color(255, 214, 10)
                 : new Color(255, 80, 100)
+        );
+
+        string mlHudText = string.IsNullOrWhiteSpace(FormatMlConfidenceText())
+            ? $"ML {FormatMlPredictionText()}"
+            : $"ML {FormatMlPredictionText()} {FormatMlConfidenceText()}";
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            mlHudText,
+            new Vector2(rightX, topY + 148),
+            2,
+            GetMlPredictionColor()
         );
     }
 
