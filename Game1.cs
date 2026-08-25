@@ -837,6 +837,8 @@ public sealed class Game1 : Game
         ));
     }
 
+
+
     private void UpdateEnemyBullets(float deltaTime)
     {
         for (int i = _enemyBullets.Count - 1; i >= 0; i--)
@@ -2146,6 +2148,46 @@ public sealed class Game1 : Game
 
         _mlPredictionText = result.Label;
         _mlPredictionConfidence = result.Confidence;
+
+        // ML-7 POLISH:
+        // Do not display TooEasy when the player is under pressure
+        // and shot resources are not fully ready.
+        // This makes the HUD prediction feel more realistic.
+        if (_mlPredictionText == "TooEasy" &&
+            ShouldBlockTooEasyPrediction())
+        {
+            _mlPredictionText = "Balanced";
+
+            // Lower confidence because this is a guarded correction.
+            _mlPredictionConfidence = Math.Min(_mlPredictionConfidence, 0.65f);
+        }
+    }
+
+    // ML-7 POLISH:
+    // Blocks TooEasy only when the player is clearly under real danger.
+    // This version is less aggressive than the previous one.
+    private bool ShouldBlockTooEasyPrediction()
+    {
+        bool veryLowShotCharges =
+            _shotCharges <= 1;
+
+        bool obstaclePressureVeryHigh =
+            _obstacleSpawner.ProgressPercent >= 0.95f;
+
+        bool enemyPressureVeryHigh =
+            _enemySpawner.ProgressPercent >= 0.95f;
+
+        bool manyEnemyBullets =
+            _enemyBullets.Count >= 4;
+
+        bool enemyLimitAlmostFull =
+            _enemies.Count >= _enemySpawner.CurrentMaxEnemies;
+
+        return veryLowShotCharges &&
+               (obstaclePressureVeryHigh ||
+                enemyPressureVeryHigh ||
+                manyEnemyBullets ||
+                enemyLimitAlmostFull);
     }
 
     // ML-7 CHANGE:

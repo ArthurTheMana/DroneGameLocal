@@ -105,6 +105,10 @@ public sealed class GameBalancePredictor
     // ML-7 CHANGE:
     // Reads the highest score from the ML.NET prediction output.
     // For SDCA Maximum Entropy, these scores usually behave like probabilities.
+    // ML-7 POLISH:
+    // The raw ML.NET score can look too confident, often showing 99%.
+    // This method softens the confidence for HUD display only.
+    // It does NOT change the predicted label.
     private static float GetConfidence(float[] scores)
     {
         if (scores.Length == 0)
@@ -112,28 +116,122 @@ public sealed class GameBalancePredictor
             return 0f;
         }
 
-        float max = scores[0];
+        const float confidenceTemperature = 2.5f;
 
-        for (int i = 1; i < scores.Length; i++)
+        if (LooksLikeProbabilityVector(scores))
         {
-            if (scores[i] > max)
+            return GetSoftenedProbabilityConfidence(
+                scores,
+                confidenceTemperature
+            );
+        }
+
+        return GetSoftmaxConfidence(
+            scores,
+            confidenceTemperature
+        );
+    }
+
+    private static bool LooksLikeProbabilityVector(float[] scores)
+    {
+        float sum = 0f;
+
+        for (int i = 0; i < scores.Length; i++)
+        {
+            if (scores[i] < 0f || scores[i] > 1f)
             {
-                max = scores[i];
+                return false;
+            }
+
+            sum += scores[i];
+        }
+
+        return sum > 0.98f && sum < 1.02f;
+    }
+
+    private static float GetSoftenedProbabilityConfidence(
+        float[] probabilities,
+        float temperature)
+    {
+        double total = 0.0;
+        double best = 0.0;
+
+        for (int i = 0; i < probabilities.Length; i++)
+        {
+            double safeProbability = Math.Max(probabilities[i], 0.000001f);
+
+            double softened = Math.Exp(
+                Math.Log(safeProbability) / temperature
+            );
+
+            total += softened;
+
+            if (softened > best)
+            {
+                best = softened;
             }
         }
 
-        // Keep it safe between 0 and 1.
-        if (max < 0f)
+        if (total <= 0.0)
         {
             return 0f;
         }
 
-        if (max > 1f)
+        return Clamp01(best / total);
+    }
+
+    private static float GetSoftmaxConfidence(
+        float[] scores,
+        float temperature)
+    {
+        double maxScore = scores[0];
+
+        for (int i = 1; i < scores.Length; i++)
+        {
+            if (scores[i] > maxScore)
+            {
+                maxScore = scores[i];
+            }
+        }
+
+        double total = 0.0;
+        double best = 0.0;
+
+        for (int i = 0; i < scores.Length; i++)
+        {
+            double value = Math.Exp(
+                (scores[i] - maxScore) / temperature
+            );
+
+            total += value;
+
+            if (value > best)
+            {
+                best = value;
+            }
+        }
+
+        if (total <= 0.0)
+        {
+            return 0f;
+        }
+
+        return Clamp01(best / total);
+    }
+
+    private static float Clamp01(double value)
+    {
+        if (value < 0.0)
+        {
+            return 0f;
+        }
+
+        if (value > 1.0)
         {
             return 1f;
         }
 
-        return max;
+        return (float)value;
     }
 
     private static string FindProjectRoot()
