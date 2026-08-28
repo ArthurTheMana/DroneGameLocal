@@ -130,13 +130,52 @@ public sealed class Game1 : Game
 
     private readonly System.Random _visualRandom = new();
 
+    private readonly List<BuffPickup> _buffs = new();
+
+    private bool _hasShield;
+    private float _shieldTimer;
+
+    private int _shieldDropFailCount;
+
+    private const float ShieldDurationSeconds = 20f;
+    private const float ShieldExplosionRadius = 130f;
+
+    private const int BaseShieldDropChancePercent = 12;
+    private const int ShieldDropChanceIncreasePerFail = 8;
+    private const int MaxShieldDropChancePercent = 80;
+
+    private float _shieldInvulnerableTimer;
+
+    private const float ShieldInvulnerableSeconds = 0.45f;
+
+    private Vector2 _shieldExplosionCenter;
+    private float _shieldExplosionTimer;
+
+    private const float ShieldExplosionAuraSeconds = 0.45f;
+
+    private Vector2 _lastDashDirection = Vector2.UnitX;
+    private Vector2 _dashVelocity = Vector2.Zero;
+
+    private float _dashActiveTimer;
+    private float _dashCooldownTimer;
+    private float _dashInvulnerableTimer;
+
+    private const float DashDistance = 135f;
+    private const float DashDurationSeconds = 0.12f;
+    private const float DashCooldownSeconds = 0.00f;
+    private const float DashInvulnerableSeconds = 0.18f;
+
+    private Boss? _boss;
+    private bool _bossSpawnedThisRun;
+    private float _bossShotTimer;
+
     // ML-6 CHANGE:
     // The trained ML model is loaded into the game.
     // For now, it only displays prediction in HUD.
     // It does not control difficulty yet.
     private readonly GameBalancePredictor _balancePredictor = new();
 
-    private string _mlPredictionText = "ML READY";
+    private string _mlPredictionText = "READY";
 
     // ML-7 CHANGE:
     // Confidence value from the ML model.
@@ -275,8 +314,7 @@ public sealed class Game1 : Game
             }
         }
 
-        if (_inputManager.IsKeyPressed(Keys.Enter) ||
-            _inputManager.IsKeyPressed(Keys.Space))
+        if (_inputManager.IsKeyPressed(Keys.Enter))
         {
             StartNewGame();
         }
@@ -326,8 +364,7 @@ public sealed class Game1 : Game
             }
         }
 
-        if (_inputManager.IsKeyPressed(Keys.Enter) ||
-            _inputManager.IsKeyPressed(Keys.Space))
+        if (_inputManager.IsKeyPressed(Keys.Enter))
         {
             StartNewGame();
         }
@@ -342,6 +379,23 @@ public sealed class Game1 : Game
         // ML-1 CHANGE:
         // Track survival time as gameplay data.
         _survivalSeconds += deltaTime;
+
+        UpdateDashTimers(deltaTime);
+
+        if (_shieldInvulnerableTimer > 0f)
+        {
+            _shieldInvulnerableTimer -= deltaTime;
+        }
+
+        if (_shieldExplosionTimer > 0f)
+        {
+            _shieldExplosionTimer -= deltaTime;
+
+            if (_shieldExplosionTimer < 0f)
+            {
+                _shieldExplosionTimer = 0f;
+            }
+        }
 
         if (_collisionCooldown > 0f)
         {
@@ -376,12 +430,41 @@ public sealed class Game1 : Game
 
         UpdateObstacles(deltaTime);
         UpdateEnemies(deltaTime);
+        UpdateBuffs(deltaTime);
 
         HandleEnemyShooting();
 
         UpdateShields(deltaTime);
         UpdateShots(deltaTime);
         UpdateEnemyBullets(deltaTime);
+
+        if (!_bossSpawnedThisRun && _scoreManager.Score >= 1000)
+        {
+            _bossSpawnedThisRun = true;
+            _boss = new Boss
+            {
+                Position = new Vector2(GameSettings.ScreenWidth - 180, GameSettings.PlayAreaTop + 40)
+            };
+        }
+
+        if (_boss != null)
+        {
+            _boss.Update(deltaTime);
+
+            _bossShotTimer += deltaTime;
+            if (_bossShotTimer >= 1.8f)
+            {
+                _bossShotTimer = 0f;
+
+                _enemyBullets.Add(new EnemyBullet(
+                    new Vector2(
+                        _boss.Position.X,
+                        _boss.Position.Y + _boss.Height / 2f
+                    ),
+                    420f
+                ));
+            }
+        }
 
         // ML-6 CHANGE:
         // Update ML prediction while playing.
@@ -400,6 +483,114 @@ public sealed class Game1 : Game
             $"Lives: {_gameState.Lives} | " +
             $"Best: {_scoreManager.HighScore} | " +
             $"Mode: {_difficultySettings.Name}";
+    }
+
+    private void UpdateDashTimers(float deltaTime)
+    {
+        if (_dashCooldownTimer > 0f)
+        {
+            _dashCooldownTimer -= deltaTime;
+
+            if (_dashCooldownTimer < 0f)
+            {
+                _dashCooldownTimer = 0f;
+            }
+        }
+
+        if (_dashInvulnerableTimer > 0f)
+        {
+            _dashInvulnerableTimer -= deltaTime;
+
+            if (_dashInvulnerableTimer < 0f)
+            {
+                _dashInvulnerableTimer = 0f;
+            }
+        }
+    }
+
+    // BUFF CHANGE:
+    // Spawns and updates Energy Core pickups during gameplay.
+    private void UpdateBuffs(float deltaTime)
+    {
+        UpdateActiveShield(deltaTime);
+
+        for (int i = _buffs.Count - 1; i >= 0; i--)
+        {
+            BuffPickup buff = _buffs[i];
+
+            buff.Update(deltaTime);
+
+            Vector2 droneCenter = new Vector2(
+                _drone.Position.X + _drone.Width / 2f,
+                _drone.Position.Y + _drone.Height / 2f
+            );
+
+            if (IsRectNearPoint(buff.GetBounds(), droneCenter, 70f))
+            {
+                ActivateShield();
+
+                // Refill player shots when picking up the shield buff.
+                _shotCharges = GameSettings.MaxShotCharges;
+
+                _buffs.RemoveAt(i);
+                continue;
+            }
+
+            if (buff.IsOffScreen())
+            {
+                _buffs.RemoveAt(i);
+            }
+        }
+    }
+
+    private void ActivateShield()
+    {
+        _hasShield = true;
+
+        // BUFF CHANGE:
+        // Shield does not stack.
+        // Picking up another shield only refreshes the timer.
+        _shieldTimer = ShieldDurationSeconds;
+    }
+
+    private void UpdateActiveShield(float deltaTime)
+    {
+        if (!_hasShield)
+        {
+            return;
+        }
+
+        _shieldTimer -= deltaTime;
+
+        if (_shieldTimer <= 0f)
+        {
+            _hasShield = false;
+            _shieldTimer = 0f;
+        }
+    }
+
+    private void DestroyEnemiesNear(Vector2 center, float radius)
+    {
+        for (int i = _enemies.Count - 1; i >= 0; i--)
+        {
+            Enemy enemy = _enemies[i];
+
+            if (!IsRectNearPoint(enemy.GetBounds(), center, radius))
+            {
+                continue;
+            }
+
+            Vector2 hitPosition = new Vector2(
+                enemy.Position.X + enemy.Width / 2f,
+                enemy.Position.Y + enemy.Height / 2f
+            );
+
+            _particles.EmitCrash(hitPosition);
+
+            _scoreManager.AddScore(enemy.ScoreReward);
+
+            _enemies.RemoveAt(i);
+        }
     }
 
     // UI POLISH:
@@ -465,6 +656,26 @@ public sealed class Game1 : Game
         _shots.Clear();
         _enemyBullets.Clear();
         _shields.Clear();
+
+        _buffs.Clear();
+
+        _buffs.Clear();
+        _hasShield = false;
+        _shieldTimer = 0f;
+
+        _boss = null;
+        _bossSpawnedThisRun = false;
+        _bossShotTimer = 0f;
+
+        _boss = null;
+        _bossSpawnedThisRun = false;
+        _bossShotTimer = 0f;
+
+        _lastDashDirection = Vector2.UnitX;
+        _dashVelocity = Vector2.Zero;
+        _dashActiveTimer = 0f;
+        _dashCooldownTimer = 0f;
+        _dashInvulnerableTimer = 0f;
 
         _obstacleSpawner.Reset(_difficultySettings);
         _enemySpawner.Reset(_difficultySettings);
@@ -581,12 +792,79 @@ public sealed class Game1 : Game
     {
         Vector2 direction = _inputManager.GetMovementDirection();
 
+        if (direction != Vector2.Zero)
+        {
+            _lastDashDirection = direction;
+            _lastDashDirection.Normalize();
+        }
+
+        if (_inputManager.IsKeyPressed(Keys.Space))
+        {
+            TryStartDash();
+        }
+
         _drone.Move(direction, deltaTime);
+
+        ApplyDash(deltaTime);
 
         _drone.ClampToScreen(
             GameSettings.ScreenWidth,
             GameSettings.ScreenHeight
         );
+    }
+
+    private void TryStartDash()
+    {
+        if (_dashCooldownTimer > 0f)
+        {
+            return;
+        }
+
+        if (_dashActiveTimer > 0f)
+        {
+            return;
+        }
+
+        Vector2 dashDirection = _lastDashDirection;
+
+        if (dashDirection == Vector2.Zero)
+        {
+            dashDirection = Vector2.UnitX;
+        }
+
+        dashDirection.Normalize();
+
+        _dashVelocity = dashDirection * (DashDistance / DashDurationSeconds);
+
+        _dashActiveTimer = DashDurationSeconds;
+        _dashCooldownTimer = DashCooldownSeconds;
+
+        // DASH CHANGE:
+        // The drone is briefly invincible during dash.
+        _dashInvulnerableTimer = DashInvulnerableSeconds;
+    }
+
+    private void ApplyDash(float deltaTime)
+    {
+        if (_dashActiveTimer <= 0f)
+        {
+            return;
+        }
+
+        _drone.MoveBy(_dashVelocity * deltaTime);
+
+        _dashActiveTimer -= deltaTime;
+
+        if (_dashActiveTimer <= 0f)
+        {
+            _dashActiveTimer = 0f;
+            _dashVelocity = Vector2.Zero;
+        }
+    }
+
+    private bool IsDashInvulnerable()
+    {
+        return _dashInvulnerableTimer > 0f;
     }
 
     // ML-2 CHANGE:
@@ -962,6 +1240,9 @@ public sealed class Game1 : Game
                 if (enemy.IsDestroyed())
                 {
                     _scoreManager.AddScore(enemy.ScoreReward);
+
+                    TryDropShieldBuffProgressive(hitPosition);
+
                     _enemies.RemoveAt(enemyIndex);
                 }
 
@@ -969,6 +1250,39 @@ public sealed class Game1 : Game
 
                 shotRemoved = true;
                 break;
+            }
+
+
+
+            if (shotRemoved)
+            {
+                continue;
+            }
+
+            // BOSS CHANGE:
+            // Player shots can damage the boss.
+            // Put this after normal enemy checks,
+            // so smaller enemies/shields can still block shots first.
+            if (_boss != null && shotBox.Intersects(_boss.GetBounds()))
+            {
+                Vector2 hitPosition = new Vector2(
+                    _boss.Position.X + _boss.Width / 2f,
+                    _boss.Position.Y + _boss.Height / 2f
+                );
+
+                _boss.Health--;
+
+                _particles.EmitCrash(hitPosition);
+
+                _shots.RemoveAt(shotIndex);
+
+                shotRemoved = true;
+
+                if (_boss.Health <= 0)
+                {
+                    _scoreManager.AddScore(500);
+                    _boss = null;
+                }
             }
 
             if (shotRemoved)
@@ -999,6 +1313,7 @@ public sealed class Game1 : Game
                 );
 
                 _particles.EmitCrash(hitPosition);
+                TryDropShieldBuffProgressive(hitPosition);
 
                 _obstacles.RemoveAt(obstacleIndex);
                 _shots.RemoveAt(shotIndex);
@@ -1012,32 +1327,70 @@ public sealed class Game1 : Game
 
     private void CheckCollision()
     {
+
+        if (IsDashInvulnerable())
+        {
+            return;
+        }
+
+        if (_shieldInvulnerableTimer > 0f)
+        {
+            return;
+        }
+
         bool crashed = CollisionChecker.HasCollision(_drone, _obstacles);
 
         Rectangle droneBox = _drone.GetBounds();
 
-        foreach (Enemy enemy in _enemies)
+        if (!crashed)
         {
-            if (droneBox.Intersects(enemy.GetBounds()))
+            foreach (Enemy enemy in _enemies)
             {
-                crashed = true;
-                break;
+                if (droneBox.Intersects(enemy.GetBounds()))
+                {
+                    crashed = true;
+                    break;
+                }
             }
         }
 
-        foreach (EnemyBullet bullet in _enemyBullets)
+        if (!crashed && _boss != null && droneBox.Intersects(_boss.GetBounds()))
         {
-            // COLLISION POLISH:
-            // Use swept bounds so fast enemy bullets cannot visually pass through the drone.
-            if (droneBox.Intersects(bullet.GetSweptBounds()))
+            crashed = true;
+        }
+
+        if (!crashed)
+        {
+            foreach (EnemyBullet bullet in _enemyBullets)
             {
-                crashed = true;
-                break;
+                if (droneBox.Intersects(bullet.GetSweptBounds()))
+                {
+                    crashed = true;
+                    break;
+                }
             }
         }
 
         if (!crashed)
         {
+            foreach (EnergyShield shield in _shields)
+            {
+                if (droneBox.Intersects(shield.GetBounds()))
+                {
+                    crashed = true;
+                    break;
+                }
+            }
+        }
+
+        if (!crashed)
+        {
+            return;
+        }
+
+        if (_hasShield)
+        {
+            TriggerShieldExplosion();
             return;
         }
 
@@ -1069,18 +1422,106 @@ public sealed class Game1 : Game
         {
             _scoreManager.SaveHighScoreIfNeeded();
         }
+    }
 
-        // LEVEL 5A CHANGE:
-        // Tank shields also act like temporary hazards.
-        // Touching a shield costs one life.
-        foreach (EnergyShield shield in _shields)
+    private void TriggerShieldExplosion()
+    {
+        _hasShield = false;
+        _shieldTimer = 0f;
+        _shieldInvulnerableTimer = ShieldInvulnerableSeconds;
+
+        Vector2 explosionCenter = new Vector2(
+            _drone.Position.X + _drone.Width / 2f,
+            _drone.Position.Y + _drone.Height / 2f
+        );
+
+        _shieldExplosionCenter = explosionCenter;
+        _shieldExplosionTimer = ShieldExplosionAuraSeconds;
+
+        _particles.EmitCrash(explosionCenter);
+        _screenShakeTimer = 0.12f;
+
+        DestroyObstaclesNear(explosionCenter, ShieldExplosionRadius);
+        DestroyEnemiesNear(explosionCenter, ShieldExplosionRadius);
+        DestroyEnemyBulletsNear(explosionCenter, ShieldExplosionRadius);
+        DestroyEnemyShieldsNear(explosionCenter, ShieldExplosionRadius);
+
+        Window.Title = "Shield exploded - game continues";
+    }
+
+    private void DestroyObstaclesNear(Vector2 center, float radius)
+    {
+        for (int i = _obstacles.Count - 1; i >= 0; i--)
         {
-            if (droneBox.Intersects(shield.GetBounds()))
+            Obstacle obstacle = _obstacles[i];
+
+            if (!IsRectNearPoint(obstacle.GetBounds(), center, radius))
             {
-                crashed = true;
-                break;
+                continue;
             }
+
+            Vector2 hitPosition = new Vector2(
+                obstacle.Position.X + obstacle.Width / 2f,
+                obstacle.Position.Y + obstacle.Height / 2f
+            );
+
+            _particles.EmitCrash(hitPosition);
+            _scoreManager.AddScore(GameSettings.DestroyObstacleScore);
+
+            _obstacles.RemoveAt(i);
         }
+    }
+
+    private void DestroyEnemyBulletsNear(Vector2 center, float radius)
+    {
+        for (int i = _enemyBullets.Count - 1; i >= 0; i--)
+        {
+            EnemyBullet bullet = _enemyBullets[i];
+
+            if (!IsRectNearPoint(bullet.GetBounds(), center, radius))
+            {
+                continue;
+            }
+
+            _particles.EmitCrash(new Vector2(
+                bullet.Position.X + bullet.Width / 2f,
+                bullet.Position.Y + bullet.Height / 2f
+            ));
+
+            _enemyBullets.RemoveAt(i);
+        }
+    }
+
+    private void DestroyEnemyShieldsNear(Vector2 center, float radius)
+    {
+        for (int i = _shields.Count - 1; i >= 0; i--)
+        {
+            EnergyShield shield = _shields[i];
+
+            if (!IsRectNearPoint(shield.GetBounds(), center, radius))
+            {
+                continue;
+            }
+
+            _particles.EmitCrash(new Vector2(
+                shield.Position.X + shield.Width / 2f,
+                shield.Position.Y + shield.Height / 2f
+            ));
+
+            _shields.RemoveAt(i);
+        }
+    }
+
+    private static bool IsRectNearPoint(Rectangle rect, Vector2 point, float radius)
+    {
+        Vector2 rectCenter = new Vector2(
+            rect.X + rect.Width / 2f,
+            rect.Y + rect.Height / 2f
+        );
+
+        float distanceSquared = Vector2.DistanceSquared(rectCenter, point);
+
+        return distanceSquared <= radius * radius;
     }
 
     protected override void Draw(GameTime gameTime)
@@ -1103,20 +1544,38 @@ public sealed class Game1 : Game
         );
 
         DrawBackground();
+        DrawActiveShieldAura();
         DrawDrone();
+        DrawShieldExplosionAura();
         DrawObstacles();
+        DrawBuffs();
 
         // LEVEL 4A CHANGE:
         // Draw enemies and shots after obstacles.
         DrawEnemies();
         DrawEnemyBullets();
+        // BOSS CHANGE:
+        // Draw boss if it has spawned.
+        // Put it before player shots so shots appear on top of the boss.
+        if (_boss != null)
+        {
+            _boss.Draw(_spriteBatch!, _pixel!);
+        }
+
         DrawShots();
 
         DrawShields();
 
         _particles.Draw(_spriteBatch, _pixel);
 
-        DrawHud();
+        // UI POLISH:
+        // Do not show gameplay HUD on the Start screen.
+        // Start screen should be clean and focused on the menu.
+        if (_gameState.Current != GameStateType.Start)
+        {
+            DrawHud();
+            DrawShieldStatusCorner();
+        }
         DrawStateOverlay();
 
         _spriteBatch.End();
@@ -1311,18 +1770,103 @@ public sealed class Game1 : Game
         }
     }
 
+    private void DrawShieldExplosionAura()
+    {
+        if (_shieldExplosionTimer <= 0f)
+        {
+            return;
+        }
+
+        float progress = 1f - (_shieldExplosionTimer / ShieldExplosionAuraSeconds);
+
+        int alpha = (int)MathHelper.Lerp(
+            180f,
+            0f,
+            progress
+        );
+
+        // VISUAL FIX:
+        // This fixed circle shows the real gameplay explosion radius.
+        // It matches ShieldExplosionRadius used by DestroyEnemiesNear / DestroyEnemyBulletsNear.
+        DrawFilledCircle(
+            _shieldExplosionCenter,
+            (int)ShieldExplosionRadius,
+            new Color(80, 180, 255, alpha / 5)
+        );
+
+        DrawCircleOutline(
+            _shieldExplosionCenter,
+            (int)ShieldExplosionRadius,
+            new Color(180, 245, 255, alpha),
+            3
+        );
+
+        // Extra style ring.
+        // This expands inside the real radius, but the main circle already shows the true hit area.
+        int waveRadius = (int)MathHelper.Lerp(
+            30f,
+            ShieldExplosionRadius,
+            progress
+        );
+
+        DrawCircleOutline(
+            _shieldExplosionCenter,
+            waveRadius,
+            new Color(255, 255, 255, alpha),
+            2
+        );
+    }
+
+    private void DrawActiveShieldAura()
+    {
+        if (!_hasShield)
+        {
+            return;
+        }
+
+        Rectangle droneBox = _drone.GetBounds();
+
+        Vector2 center = new Vector2(
+            droneBox.X + droneBox.Width / 2f,
+            droneBox.Y + droneBox.Height / 2f
+        );
+
+        float pulse = 1f + 0.08f * MathF.Sin(_shieldTimer * 8f);
+        int radius = (int)(42 * pulse);
+
+        DrawFilledCircle(
+            center,
+            radius,
+            new Color(80, 180, 255, 35)
+        );
+
+        DrawCircleOutline(
+            center,
+            radius,
+            new Color(150, 230, 255, 210),
+            2
+        );
+
+        DrawCircleOutline(
+            center,
+            radius + 5,
+            new Color(80, 180, 255, 100),
+            1
+        );
+    }
+
     // UI POLISH:
     // Dynamic start menu layout.
     // Text positions are calculated from screen size,
     // so the menu still looks correct when ScreenWidth/ScreenHeight changes.
     private void DrawStartMenuOverlay()
     {
-        int menuWidth = Math.Min(820, GameSettings.ScreenWidth - 500);
-        int menuHeight = 360;
+        int menuWidth = 760;
+        int menuHeight = 340;
 
         Rectangle menuBox = new Rectangle(
             GameSettings.ScreenWidth / 2 - menuWidth / 2,
-            GameSettings.PlayAreaTop + 70,
+            GameSettings.ScreenHeight / 2 - menuHeight / 2,
             menuWidth,
             menuHeight
         );
@@ -1332,7 +1876,7 @@ public sealed class Game1 : Game
             new Color(30, 70, 120, 220)
         );
 
-        int currentY = menuBox.Y + 32;
+        int currentY = menuBox.Y + 34;
 
         PixelText.DrawCenteredText(
             _spriteBatch!,
@@ -1344,7 +1888,7 @@ public sealed class Game1 : Game
             Color.White
         );
 
-        currentY += 52;
+        currentY += 58;
 
         string modeText = _isBotEnabled
             ? "BOT MODE RANDOM"
@@ -1363,7 +1907,7 @@ public sealed class Game1 : Game
         currentY += 46;
 
         string changeText = _isBotEnabled
-            ? "BOT WILL PICK EASY NORMAL OR HARD"
+            ? "BOT PICKS EASY NORMAL HARD"
             : "A D OR LEFT RIGHT TO CHANGE";
 
         PixelText.DrawCenteredText(
@@ -1378,21 +1922,21 @@ public sealed class Game1 : Game
 
         currentY += 34;
 
-        string difficultyHelpText = _isBotEnabled
+        string difficultyText = _isBotEnabled
             ? "RANDOM DIFFICULTY EACH RUN"
             : "1 EASY   2 NORMAL   3 HARD";
 
         PixelText.DrawCenteredText(
             _spriteBatch!,
             _pixel!,
-            difficultyHelpText,
+            difficultyText,
             GameSettings.ScreenWidth,
             currentY,
             2,
             Color.White
         );
 
-        currentY += 50;
+        currentY += 52;
 
         PixelText.DrawCenteredText(
             _spriteBatch!,
@@ -1404,40 +1948,16 @@ public sealed class Game1 : Game
             new Color(0, 217, 255)
         );
 
-        currentY += 46;
+        currentY += 48;
 
         PixelText.DrawCenteredText(
             _spriteBatch!,
             _pixel!,
-            "CHARGES AUTO BUILD PRESS J",
+            "J SHOOT   SPACE DASH   B BOT",
             GameSettings.ScreenWidth,
             currentY,
             2,
             new Color(255, 214, 10)
-        );
-
-        currentY += 32;
-
-        PixelText.DrawCenteredText(
-            _spriteBatch!,
-            _pixel!,
-            "ENDLESS SCORE MODE",
-            GameSettings.ScreenWidth,
-            currentY,
-            2,
-            Color.White
-        );
-
-        currentY += 32;
-
-        PixelText.DrawCenteredText(
-            _spriteBatch!,
-            _pixel!,
-            "PRESS B TO TOGGLE BOT",
-            GameSettings.ScreenWidth,
-            currentY,
-            2,
-            new Color(0, 217, 255)
         );
     }
 
@@ -1448,23 +1968,87 @@ public sealed class Game1 : Game
 
     private void DrawHud()
     {
+        // Solid HUD bar so stars do not show through.
         DrawRect(
             new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.HudHeight),
-            new Color(0, 0, 0, 165)
+            new Color(6, 10, 20, 255)
         );
 
-        int leftX = 28;
-        int centerX = GameSettings.ScreenWidth / 2 - 260;
-        int rightX = GameSettings.ScreenWidth - 380;
-        int topY = 22;
+        // A clean divider line between HUD and play area.
+        DrawRect(
+            new Rectangle(0, GameSettings.HudHeight - 2, GameSettings.ScreenWidth, 2),
+            new Color(50, 80, 120, 255)
+        );
 
-        // LEFT SIDE
+        int panelWidth = 360;
+        int panelHeight = 110;
+        int gap = 30;
+
+        int totalWidth = panelWidth * 3 + gap * 2;
+        int startX = (GameSettings.ScreenWidth - totalWidth) / 2;
+        int panelY = 18;
+
+        if (_boss != null)
+        {
+            PixelText.DrawText(
+                _spriteBatch!,
+                _pixel!,
+                $"BOSS HP {_boss.Health}",
+                new Vector2(GameSettings.ScreenWidth / 2 - 80, GameSettings.HudHeight + 10),
+                1,
+                new Color(255, 80, 180)
+            );
+        }
+
+        Rectangle leftPanel = new Rectangle(startX, panelY, panelWidth, panelHeight);
+        Rectangle centerPanel = new Rectangle(startX + panelWidth + gap, panelY, panelWidth, panelHeight);
+        Rectangle rightPanel = new Rectangle(startX + (panelWidth + gap) * 2, panelY, panelWidth, panelHeight);
+
+        DrawPanel(leftPanel);
+        DrawPanel(centerPanel);
+        DrawPanel(rightPanel);
+
+        DrawLeftHudPanel(leftPanel);
+        DrawCenterHudPanel(centerPanel);
+        DrawRightHudPanel(rightPanel);
+    }
+
+    private void DrawPanel(Rectangle rect)
+    {
+        DrawRect(rect, new Color(0, 0, 0, 180));
+
+        DrawRect(
+            new Rectangle(rect.X, rect.Y, rect.Width, 2),
+            new Color(70, 110, 170)
+        );
+
+        DrawRect(
+            new Rectangle(rect.X, rect.Bottom - 2, rect.Width, 2),
+            new Color(70, 110, 170)
+        );
+
+        DrawRect(
+            new Rectangle(rect.X, rect.Y, 2, rect.Height),
+            new Color(70, 110, 170)
+        );
+
+        DrawRect(
+            new Rectangle(rect.Right - 2, rect.Y, 2, rect.Height),
+            new Color(70, 110, 170)
+        );
+    }
+
+    private void DrawLeftHudPanel(Rectangle panel)
+    {
+        int x = panel.X + 16;
+        int y = panel.Y + 12;
+
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"SCORE {_scoreManager.Score}",
-            new Vector2(leftX, topY),
-            3,
+            new Vector2(x, y),
+            2,
             Color.White
         );
 
@@ -1472,8 +2056,8 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"MODE {_difficultySettings.Name}",
-            new Vector2(leftX, topY + 42),
-            2,
+            new Vector2(x, y + 28),
+            1,
             Color.White
         );
 
@@ -1481,8 +2065,8 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"OBSTACLES {_obstacleSpawner.CurrentMaxObstacles}/{_difficultySettings.MaxObstacles}",
-            new Vector2(leftX, topY + 74),
-            2,
+            new Vector2(x, y + 52),
+            1,
             new Color(255, 214, 10)
         );
 
@@ -1490,18 +2074,24 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             $"ENEMIES {_enemySpawner.CurrentMaxEnemies}/{_difficultySettings.MaxEnemies}",
-            new Vector2(leftX, topY + 106),
-            2,
+            new Vector2(x, y + 76),
+            1,
             new Color(255, 140, 40)
         );
+    }
 
-        // CENTER SIDE
-        PixelText.DrawText(
+    private void DrawCenterHudPanel(Rectangle panel)
+    {
+        int titleY = panel.Y + 10;
+        int x = panel.X + 20;
+
+        PixelText.DrawCenteredText(
             _spriteBatch!,
             _pixel!,
             $"LIVES {_gameState.Lives}",
-            new Vector2(GameSettings.ScreenWidth / 2 - 90, topY),
-            3,
+            GameSettings.ScreenWidth,
+            titleY,
+            2,
             new Color(0, 217, 255)
         );
 
@@ -1509,43 +2099,48 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             "OBSTACLE PRESSURE",
-            new Vector2(centerX, topY + 58),
-            2,
+            new Vector2(x, panel.Y + 40),
+            1,
             new Color(255, 214, 10)
         );
 
         DrawProgressBar(
-            x: centerX,
-            y: topY + 86,
-            width: 360,
-            height: 14,
-            progress: _obstacleSpawner.ProgressPercent
+            x,
+            panel.Y + 58,
+            panel.Width - 40,
+            12,
+            _obstacleSpawner.ProgressPercent
         );
 
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             "ENEMY PRESSURE",
-            new Vector2(centerX, topY + 108),
-            2,
+            new Vector2(x, panel.Y + 76),
+            1,
             new Color(255, 140, 40)
         );
 
         DrawProgressBar(
-            x: centerX,
-            y: topY + 136,
-            width: 360,
-            height: 14,
-            progress: _enemySpawner.ProgressPercent
+            x,
+            panel.Y + 94,
+            panel.Width - 40,
+            12,
+            _enemySpawner.ProgressPercent
         );
+    }
 
-        // RIGHT SIDE
+    private void DrawRightHudPanel(Rectangle panel)
+    {
+        int x = panel.X + 16;
+        int y = panel.Y + 12;
+
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"BEST {_scoreManager.HighScore}",
-            new Vector2(rightX, topY),
-            2,
+            new Vector2(x, y),
+            1,
             new Color(255, 214, 10)
         );
 
@@ -1553,19 +2148,255 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             _isBotEnabled ? "BOT ON" : "BOT OFF",
-            new Vector2(rightX, topY + 32),
-            2,
-            _isBotEnabled
-                ? new Color(0, 217, 255)
-                : Color.White
+            new Vector2(x, y + 24),
+            1,
+            _isBotEnabled ? new Color(0, 217, 255) : Color.White
         );
 
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
             $"SHOT {_shotCharges}/{GameSettings.MaxShotCharges}",
-            new Vector2(rightX, topY + 70),
+            new Vector2(x, y + 48),
+            1,
+            new Color(0, 217, 255)
+        );
+
+        float rechargeProgress = _shotCharges >= GameSettings.MaxShotCharges
+            ? 1f
+            : MathHelper.Clamp(_shotRechargeTimer / GameSettings.ShotRechargeSeconds, 0f, 1f);
+
+        DrawProgressBar(
+            x,
+            y + 66,
+            panel.Width - 32,
+            12,
+            rechargeProgress
+        );
+
+        string shotText = _shotCharges > 0 ? "PRESS J TO SHOOT" : "RECHARGING";
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            shotText,
+            new Vector2(x, y + 84),
+            1,
+            _shotCharges > 0 ? new Color(255, 214, 10) : new Color(255, 80, 100)
+        );
+
+        string dashText = _dashCooldownTimer <= 0f
+            ? "DASH READY"
+            : $"DASH {(int)Math.Ceiling(_dashCooldownTimer)}s";
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            dashText,
+            new Vector2(x + 170, y + 84),
+            1,
+            _dashCooldownTimer <= 0f
+                ? new Color(0, 217, 255)
+                : new Color(255, 214, 10)
+        );
+
+        string mlHudText = string.IsNullOrWhiteSpace(FormatMlConfidenceText())
+            ? $"ML {FormatMlPredictionText()}"
+            : $"ML {FormatMlPredictionText()} {FormatMlConfidenceText()}";
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            mlHudText,
+            new Vector2(x, y + 104),
+            1,
+            GetMlPredictionColor()
+        );
+    }
+
+    private void DrawShieldStatusCorner()
+    {
+        if (!_hasShield)
+        {
+            return;
+        }
+
+        int boxWidth = 190;
+        int boxHeight = 46;
+
+        int x = GameSettings.ScreenWidth - boxWidth - 24;
+        int y = GameSettings.PlayAreaTop + 16;
+
+        DrawRect(
+            new Rectangle(x, y, boxWidth, boxHeight),
+            new Color(0, 0, 0, 170)
+        );
+
+        DrawRect(
+            new Rectangle(x, y, boxWidth, 2),
+            new Color(80, 180, 255)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"SHIELD {(int)Math.Ceiling(_shieldTimer)}s",
+            new Vector2(x + 12, y + 8),
+            1,
+            new Color(150, 230, 255)
+        );
+
+        float shieldProgress = MathHelper.Clamp(
+            _shieldTimer / ShieldDurationSeconds,
+            0f,
+            1f
+        );
+
+        DrawProgressBar(
+            x + 12,
+            y + 28,
+            boxWidth - 24,
+            10,
+            shieldProgress
+        );
+    }
+
+    private void DrawLeftHudCard(Rectangle card)
+    {
+        int x = card.X + 18;
+        int y = card.Y + 14;
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"SCORE {_scoreManager.Score}",
+            new Vector2(x, y),
             2,
+            Color.White
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"MODE {_difficultySettings.Name}",
+            new Vector2(x, y + 34),
+            1,
+            Color.White
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"OBSTACLES {_obstacleSpawner.CurrentMaxObstacles}/{_difficultySettings.MaxObstacles}",
+            new Vector2(x, y + 62),
+            1,
+            new Color(255, 214, 10)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"ENEMIES {_enemySpawner.CurrentMaxEnemies}/{_difficultySettings.MaxEnemies}",
+            new Vector2(x, y + 90),
+            1,
+            new Color(255, 140, 40)
+        );
+    }
+
+    private void DrawCenterHudCard(Rectangle card)
+    {
+        int centerX = card.X + card.Width / 2;
+        int x = card.X + 36;
+        int y = card.Y + 14;
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            $"LIVES {_gameState.Lives}",
+            GameSettings.ScreenWidth,
+            y,
+            2,
+            new Color(0, 217, 255)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            "OBSTACLE PRESSURE",
+            new Vector2(x, y + 42),
+            1,
+            new Color(255, 214, 10)
+        );
+
+        DrawProgressBar(
+            x: x,
+            y: y + 64,
+            width: card.Width - 72,
+            height: 12,
+            progress: _obstacleSpawner.ProgressPercent
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            "ENEMY PRESSURE",
+            new Vector2(x, y + 86),
+            1,
+            new Color(255, 140, 40)
+        );
+
+        DrawProgressBar(
+            x: x,
+            y: y + 108,
+            width: card.Width - 72,
+            height: 12,
+            progress: _enemySpawner.ProgressPercent
+        );
+    }
+
+    private void DrawRightHudCard(Rectangle card)
+    {
+        int x = card.X + 18;
+        int y = card.Y + 14;
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"BEST {_scoreManager.HighScore}",
+            new Vector2(x, y),
+            1,
+            new Color(255, 214, 10)
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            _isBotEnabled ? "BOT ON" : "BOT OFF",
+            new Vector2(x, y + 24),
+            1,
+            _isBotEnabled
+                ? new Color(0, 217, 255)
+                : Color.White
+        );
+
+        if (_wasBotUsedThisRun)
+        {
+            PixelText.DrawText(
+                _spriteBatch!,
+                _pixel!,
+                "NO BEST",
+                new Vector2(x + 150, y + 24),
+                1,
+                new Color(255, 80, 100)
+            );
+        }
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"SHOT {_shotCharges}/{GameSettings.MaxShotCharges}",
+            new Vector2(x, y + 56),
+            1,
             new Color(0, 217, 255)
         );
 
@@ -1578,10 +2409,10 @@ public sealed class Game1 : Game
             );
 
         DrawProgressBar(
-            x: rightX,
-            y: topY + 100,
-            width: 260,
-            height: 14,
+            x: x,
+            y: y + 78,
+            width: card.Width - 36,
+            height: 12,
             progress: rechargeProgress
         );
 
@@ -1593,8 +2424,8 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             shotInstructionText,
-            new Vector2(rightX, topY + 124),
-            2,
+            new Vector2(x, y + 100),
+            1,
             _shotCharges > 0
                 ? new Color(255, 214, 10)
                 : new Color(255, 80, 100)
@@ -1608,8 +2439,8 @@ public sealed class Game1 : Game
             _spriteBatch!,
             _pixel!,
             mlHudText,
-            new Vector2(rightX, topY + 148),
-            2,
+            new Vector2(x, y + 128),
+            1,
             GetMlPredictionColor()
         );
     }
@@ -1853,6 +2684,14 @@ public sealed class Game1 : Game
         }
     }
 
+    private void DrawBuffs()
+    {
+        foreach (BuffPickup buff in _buffs)
+        {
+            buff.Draw(_spriteBatch!, _pixel!);
+        }
+    }
+
     private void DrawEnemyBullets()
     {
         foreach (EnemyBullet bullet in _enemyBullets)
@@ -1937,6 +2776,61 @@ public sealed class Game1 : Game
     private void DrawRect(Rectangle rectangle, Color color)
     {
         _spriteBatch!.Draw(_pixel!, rectangle, color);
+    }
+
+    private void DrawFilledCircle(Vector2 center, int radius, Color color)
+    {
+        for (int y = -radius; y <= radius; y++)
+        {
+            for (int x = -radius; x <= radius; x++)
+            {
+                if (x * x + y * y <= radius * radius)
+                {
+                    DrawRect(
+                        new Rectangle(
+                            (int)center.X + x,
+                            (int)center.Y + y,
+                            1,
+                            1
+                        ),
+                        color
+                    );
+                }
+            }
+        }
+    }
+
+    private void DrawCircleOutline(
+        Vector2 center,
+        int radius,
+        Color color,
+        int thickness
+    )
+    {
+        int outer = radius * radius;
+        int innerRadius = radius - thickness;
+        int inner = innerRadius * innerRadius;
+
+        for (int y = -radius; y <= radius; y++)
+        {
+            for (int x = -radius; x <= radius; x++)
+            {
+                int distance = x * x + y * y;
+
+                if (distance <= outer && distance >= inner)
+                {
+                    DrawRect(
+                        new Rectangle(
+                            (int)center.X + x,
+                            (int)center.Y + y,
+                            1,
+                            1
+                        ),
+                        color
+                    );
+                }
+            }
+        }
     }
 
 
@@ -2387,6 +3281,40 @@ public sealed class Game1 : Game
         return GameBalanceLabel.Balanced;
     }
 
+    private void TryDropShieldBuffProgressive(Vector2 position)
+    {
+        // If a buff is already on screen, don't spawn another.
+        if (_buffs.Count > 0)
+        {
+            return;
+        }
 
+        int chance = BaseShieldDropChancePercent +
+                     (_shieldDropFailCount * ShieldDropChanceIncreasePerFail);
+
+        chance = Math.Min(chance, MaxShieldDropChancePercent);
+
+        if (_visualRandom.Next(100) < chance)
+        {
+            float clampedY = MathHelper.Clamp(
+                position.Y,
+                GameSettings.PlayAreaTop + 20,
+                GameSettings.ScreenHeight - 50
+            );
+
+            _buffs.Add(new BuffPickup
+            {
+                Position = new Vector2(position.X, clampedY)
+            });
+
+            // Reset the pity counter because a buff finally spawned.
+            _shieldDropFailCount = 0;
+        }
+        else
+        {
+            // No drop this time, so next kill has better chance.
+            _shieldDropFailCount++;
+        }
+    }
 
 }

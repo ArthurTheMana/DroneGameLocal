@@ -27,6 +27,11 @@ public sealed class Drone {
         Position += direction * Speed * deltaTime;
     }
 
+    public void MoveBy(Vector2 offset)
+    {
+        Position += offset;
+    }
+
     public void ClampToScreen(int screenWidth, int screenHeight)
     {
         Position = new Vector2(

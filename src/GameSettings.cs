@@ -55,11 +55,7 @@ public static class GameSettings
 
     // UI POLISH:
     // Compact top HUD height.
-    public const int HudHeight = 145;
-
-    // UI POLISH:
-    // Player and bot cannot move into the HUD area.
-    public const int PlayAreaTop = HudHeight + 20;
-
+    public const int HudHeight = 150;
+    public const int PlayAreaTop = HudHeight + 10;
 
 }
