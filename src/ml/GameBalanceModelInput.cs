@@ -22,6 +22,21 @@ public sealed class GameBalanceModelInput
     public float ShotCharges { get; set; }
     public float ActiveShields { get; set; }
 
+    public float HasShield { get; set; }
+    public float ShieldTimeLeft { get; set; }
+    public float ShieldPickupsThisRun { get; set; }
+    public float ShieldActiveSecondsThisRun { get; set; }
+
+    public float DashCooldown { get; set; }
+    public float DashReady { get; set; }
+    public float DashInvulnerable { get; set; }
+    public float DashUsesThisRun { get; set; }
+
+    public float BossActive { get; set; }
+    public float BossHealth { get; set; }
+
+    public float BuffsOnScreen { get; set; }
+
     public string Difficulty { get; set; } = "Normal";
     public string ControlMode { get; set; } = "Human";
 

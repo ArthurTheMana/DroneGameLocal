@@ -43,11 +43,31 @@ public sealed class GameplaySample
     public string AutoLabelReason { get; init; } = "ManualHumanFeedback";
     public string Label { get; init; } = "Balanced";
 
-    public static string CsvHeader =>
+    public float HasShield { get; set; }
+    public float ShieldTimeLeft { get; set; }
+
+    public float DashCooldown { get; set; }
+    public float DashReady { get; set; }
+    public float DashInvulnerable { get; set; }
+
+    public float BossActive { get; set; }
+    public float BossHealth { get; set; }
+
+    public float BuffsOnScreen { get; set; }
+
+    public float DashUsesThisRun { get; set; }
+
+    public float ShieldPickupsThisRun { get; set; }
+    public float ShieldActiveSecondsThisRun { get; set; }
+
+    public const string CsvHeader =
         "SurvivalSeconds,Score,Lives," +
         "ActiveObstacles,CurrentMaxObstacles,ObstaclePressure," +
         "ActiveEnemies,CurrentMaxEnemies,EnemyPressure," +
         "ActiveEnemyBullets,ActivePlayerShots,ShotCharges,ActiveShields," +
+        "HasShield,ShieldTimeLeft,ShieldPickupsThisRun,ShieldActiveSecondsThisRun," +
+        "DashCooldown,DashReady,DashInvulnerable,DashUsesThisRun," +
+        "BossActive,BossHealth,BuffsOnScreen," +
         "Difficulty,ControlMode,TimeRating,ScoreRating,AutoLabelReason,Label";
 
     public string ToCsvRow()
@@ -56,16 +76,34 @@ public sealed class GameplaySample
             SurvivalSeconds.ToString("0.00", CultureInfo.InvariantCulture),
             Score,
             Lives,
+
             ActiveObstacles,
             CurrentMaxObstacles,
             ObstaclePressure.ToString("0.00", CultureInfo.InvariantCulture),
+
             ActiveEnemies,
             CurrentMaxEnemies,
             EnemyPressure.ToString("0.00", CultureInfo.InvariantCulture),
+
             ActiveEnemyBullets,
             ActivePlayerShots,
             ShotCharges,
             ActiveShields,
+
+            HasShield,
+            ShieldTimeLeft.ToString("0.00", CultureInfo.InvariantCulture),
+            ShieldPickupsThisRun,
+            ShieldActiveSecondsThisRun.ToString("0.00", CultureInfo.InvariantCulture),
+
+            DashCooldown.ToString("0.00", CultureInfo.InvariantCulture),
+            DashReady,
+            DashInvulnerable,
+            DashUsesThisRun,
+
+            BossActive,
+            BossHealth,
+            BuffsOnScreen,
+
             Difficulty,
             ControlMode,
             TimeRating,

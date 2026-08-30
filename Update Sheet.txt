@@ -1,0 +1,285 @@
+28th August 2026
+
+--- 
+
+Game1.cs:
+
+Delete these old / unused blocks from the original file:
+1. Lines 2264-2446:
+   - DrawLeftHudCard(...)
+   - DrawCenterHudCard(...)
+   - DrawRightHudCard(...)
+   Reason: old floating-card HUD methods. Current HUD uses DrawLeftHudPanel / DrawCenterHudPanel / DrawRightHudPanel.
+
+2. Lines 3070-3092:
+   - ShouldBlockTooEasyPrediction()
+   Reason: old ML correction helper. It is not called anymore.
+
+3. Lines 2727-2737:
+   - DrawStartPanel(...)
+   Reason: old start panel helper. Current start menu uses DrawStartMenuOverlay().
+
+4. Lines 1716-1724:
+   - the second duplicated PixelText.DrawCenteredText(...) block that draws restartText.
+   Reason: restartText is drawn twice at the same position.
+
+Replace these bigger methods:
+1. Lines 375-486:
+   - Replace UpdatePlayingState(...) with the cleaned workflow version.
+   Reason: move shield timers, spawners, boss update, and window title into helper methods.
+
+2. Lines 513-544:
+   - Replace UpdateBuffs(...) with the cleaned version.
+   Reason: shield timer is now updated by UpdateShieldTimers(), not inside UpdateBuffs().
+
+3. Lines 614-690:
+   - Replace StartNewGame(...) with the cleaned version.
+   Reason: duplicated _buffs.Clear() and duplicated boss reset are removed. ResetRunFeatures() handles dash/shield/boss reset.
+
+4. Lines 1527-1584:
+   - Replace Draw(...) with the cleaned drawing order.
+   Reason: buffs are drawn only while Playing, explosion aura draws behind objects, active shield aura draws around the drone.
+
+Add these helper methods after UpdateDashTimers(...):
+- UpdateShieldTimers(...)
+- UpdateSpawners(...)
+- UpdateBoss(...)
+- ResetRunFeatures(...)
+- UpdateWindowTitle(...)
+
+29th August 2026
+
+---
+
+Game1.cs:
+
+Add these new run-level tracking fields:
+
+Add near the shield/dash fields:
+
+_dashUsesThisRun
+_shieldPickupsThisRun
+_shieldActiveSecondsThisRun
+
+Reason: ML should know how many times dash was used and how much shield was used during the whole run, not only the final state.
+
+Add near the _last... snapshot fields:
+
+_lastDashUsesThisRun
+_lastShieldPickupsThisRun
+_lastShieldActiveSecondsThisRun
+
+Reason: Game Over may clear or change objects, so ML logging should use the last saved gameplay snapshot.
+
+Replace / update these methods:
+
+Update TryStartDash(...)
+
+Add _dashUsesThisRun++ after dash successfully starts.
+Do not count failed dash attempts.
+
+Reason: count real dash usage only.
+
+Update ActivateShield(...)
+
+Add _shieldPickupsThisRun++.
+Shield still does not stack.
+Picking up another shield refreshes timer.
+
+Reason: ML should know how many shield pickups happened during the run.
+
+Replace UpdateActiveShield(...)
+
+Add _shieldActiveSecondsThisRun += activeTimeThisFrame.
+Use Math.Min(deltaTime, _shieldTimer) when counting active time.
+
+Reason: track total shield usage time accurately.
+
+Update StartNewGame(...) or ResetRunFeatures(...)
+
+Reset:
+_dashUsesThisRun = 0
+_shieldPickupsThisRun = 0
+_shieldActiveSecondsThisRun = 0f
+
+Reason: counters must start fresh each run.
+
+Update CaptureGameplaySnapshot(...)
+
+Add:
+_lastHasShield
+_lastShieldTimeLeft
+_lastShieldPickupsThisRun
+_lastShieldActiveSecondsThisRun
+_lastDashCooldown
+_lastDashReady
+_lastDashInvulnerable
+_lastDashUsesThisRun
+_lastBossActive
+_lastBossHealth
+_lastBuffsOnScreen
+
+Reason: save the latest useful gameplay state before Game Over logging.
+
+Update LogMlSample(...)
+
+Add the new shield/dash/boss/buff values into new GameplaySample.
+
+Reason: CSV rows should include the new gameplay mechanics.
+
+Update UpdateMlPrediction(...)
+
+Add the new shield/dash/boss/buff values into new GameBalanceModelInput.
+
+Reason: live ML prediction should understand shield, dash, boss, and buffs.
+
+GameplaySample.cs:
+
+Add these new properties:
+
+Shield fields:
+HasShield
+ShieldTimeLeft
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+Dash fields:
+DashCooldown
+DashReady
+DashInvulnerable
+DashUsesThisRun
+Boss / buff fields:
+BossActive
+BossHealth
+BuffsOnScreen
+
+Reason: these become new ML features in the CSV dataset.
+
+Update CsvHeader:
+
+Add the new columns after ActiveShields.
+Keep the same order as ToCsvRow().
+
+Reason: CSV header and row values must match exactly.
+
+Update ToCsvRow():
+
+Add the new values after ActiveShields.
+Remove duplicated old shield/dash/boss values.
+
+Reason: CSV row must have the same number of values as the header.
+
+GameplayDataLogger.cs:
+
+No major code change needed.
+
+Reason: this file already uses:
+
+GameplaySample.CsvHeader
+sample.ToCsvRow()
+
+So the real format changes belong in GameplaySample.cs.
+
+GameBalanceModelInput.cs:
+
+Add the same new properties as GameplaySample.cs:
+
+HasShield
+ShieldTimeLeft
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+DashCooldown
+DashReady
+DashInvulnerable
+DashUsesThisRun
+BossActive
+BossHealth
+BuffsOnScreen
+
+Reason: live ML prediction uses GameBalanceModelInput, so it must match the new feature set.
+
+30th August 2026
+
+---
+
+Game1.cs:
+
+Fix duplicate field declarations:
+
+Remove duplicate declarations of:
+
+_lastDashUsesThisRun
+_lastShieldPickupsThisRun
+_lastShieldActiveSecondsThisRun
+
+Reason: Game1 already contains these fields.
+
+Fix duplicate object initializer values:
+
+In new GameplaySample
+Keep each field only once:
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+DashUsesThisRun
+In new GameBalanceModelInput
+Keep each field only once:
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+DashUsesThisRun
+
+Reason: C# does not allow duplicate initialization of the same property inside one object initializer.
+
+Update DashReady logic:
+
+In CaptureGameplaySnapshot(...)
+Change:
+_dashCooldownTimer <= 0f
+To:
+_dashCooldownTimer <= 0.05f
+In UpdateMlPrediction(...)
+Change:
+_dashCooldownTimer <= 0f
+To:
+_dashCooldownTimer <= 0.05f
+
+Reason: cooldown may visually be 0.00 but still have a tiny float value. 0.05f treats it as ready.
+
+GameBalanceModelInput.cs:
+
+Fix duplicate properties:
+
+Remove duplicate definitions of:
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+DashUsesThisRun
+
+Reason: these properties were added twice.
+
+Keep one clean block:
+
+HasShield
+ShieldTimeLeft
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+DashCooldown
+DashReady
+DashInvulnerable
+DashUsesThisRun
+BossActive
+BossHealth
+BuffsOnScreen
+gameplay-training-data.csv:
+
+Validate new CSV output:
+
+Check that header and row have the same number of columns.
+Confirm the new fields exist:
+ShieldPickupsThisRun
+ShieldActiveSecondsThisRun
+DashUsesThisRun
+BossActive
+BossHealth
+BuffsOnScreen
+Fix duplicated row values if row has more values than header.
+
+Reason: ML.NET training will fail or read wrong data if CSV columns do not align.
+

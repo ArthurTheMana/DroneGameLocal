@@ -121,6 +121,22 @@ public sealed class Game1 : Game
     private int _lastShotCharges;
     private int _lastActiveShields;
 
+    private float _lastHasShield;
+    private float _lastShieldTimeLeft;
+
+    private float _lastDashCooldown;
+    private float _lastDashReady;
+    private float _lastDashInvulnerable;
+
+    private float _lastBossActive;
+    private float _lastBossHealth;
+
+    private float _lastBuffsOnScreen;
+
+    private float _lastDashUsesThisRun;
+    private float _lastShieldPickupsThisRun;
+    private float _lastShieldActiveSecondsThisRun;
+
     // LEVEL 4C CHANGE:
     // Auto charge system.
     // The game slowly builds shot charges up to 3.
@@ -156,13 +172,17 @@ public sealed class Game1 : Game
     private Vector2 _lastDashDirection = Vector2.UnitX;
     private Vector2 _dashVelocity = Vector2.Zero;
 
+    private int _dashUsesThisRun;
+    private int _shieldPickupsThisRun;
+    private float _shieldActiveSecondsThisRun;
+
     private float _dashActiveTimer;
     private float _dashCooldownTimer;
     private float _dashInvulnerableTimer;
 
     private const float DashDistance = 135f;
     private const float DashDurationSeconds = 0.12f;
-    private const float DashCooldownSeconds = 0.00f;
+    private const float DashCooldownSeconds = 2.00f;
     private const float DashInvulnerableSeconds = 0.18f;
 
     private Boss? _boss;
@@ -376,26 +396,10 @@ public sealed class Game1 : Game
     {
         float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
-        // ML-1 CHANGE:
-        // Track survival time as gameplay data.
         _survivalSeconds += deltaTime;
 
         UpdateDashTimers(deltaTime);
-
-        if (_shieldInvulnerableTimer > 0f)
-        {
-            _shieldInvulnerableTimer -= deltaTime;
-        }
-
-        if (_shieldExplosionTimer > 0f)
-        {
-            _shieldExplosionTimer -= deltaTime;
-
-            if (_shieldExplosionTimer < 0f)
-            {
-                _shieldExplosionTimer = 0f;
-            }
-        }
+        UpdateShieldTimers(deltaTime);
 
         if (_collisionCooldown > 0f)
         {
@@ -404,85 +408,28 @@ public sealed class Game1 : Game
             return;
         }
 
-        // LEVEL 4C CHANGE:
-        // Shots recharge automatically.
-        // Manual shooting only happens when bot is OFF.
         HandleChargeShot(deltaTime);
-
-        // ML-2 CHANGE:
-        // If bot is ON, bot controls movement and shooting.
-        // If bot is OFF, player controls movement normally.
         HandlePlayerOrBotControl(deltaTime);
 
-        _obstacleSpawner.Update(
-            deltaTime,
-            _obstacles,
-            _scoreManager.Score,
-            _difficultySettings
-        );
-
-        _enemySpawner.Update(
-            deltaTime,
-            _enemies,
-            _scoreManager.Score,
-            _difficultySettings
-        );
+        UpdateSpawners(deltaTime);
 
         UpdateObstacles(deltaTime);
         UpdateEnemies(deltaTime);
-        UpdateBuffs(deltaTime);
-
         HandleEnemyShooting();
+        UpdateBoss(deltaTime);
 
         UpdateShields(deltaTime);
         UpdateShots(deltaTime);
         UpdateEnemyBullets(deltaTime);
+        UpdateBuffs(deltaTime);
 
-        if (!_bossSpawnedThisRun && _scoreManager.Score >= 1000)
-        {
-            _bossSpawnedThisRun = true;
-            _boss = new Boss
-            {
-                Position = new Vector2(GameSettings.ScreenWidth - 180, GameSettings.PlayAreaTop + 40)
-            };
-        }
-
-        if (_boss != null)
-        {
-            _boss.Update(deltaTime);
-
-            _bossShotTimer += deltaTime;
-            if (_bossShotTimer >= 1.8f)
-            {
-                _bossShotTimer = 0f;
-
-                _enemyBullets.Add(new EnemyBullet(
-                    new Vector2(
-                        _boss.Position.X,
-                        _boss.Position.Y + _boss.Height / 2f
-                    ),
-                    420f
-                ));
-            }
-        }
-
-        // ML-6 CHANGE:
-        // Update ML prediction while playing.
         UpdateMlPrediction(deltaTime);
 
         CheckShotHits();
-
-        // ML-1 CHANGE:
-        // Capture the latest gameplay state before collision may clear objects.
         CaptureGameplaySnapshot();
-
         CheckCollision();
 
-        Window.Title =
-            $"Score: {_scoreManager.Score} | " +
-            $"Lives: {_gameState.Lives} | " +
-            $"Best: {_scoreManager.HighScore} | " +
-            $"Mode: {_difficultySettings.Name}";
+        UpdateWindowTitle();
     }
 
     private void UpdateDashTimers(float deltaTime)
@@ -508,12 +455,123 @@ public sealed class Game1 : Game
         }
     }
 
+    private void UpdateShieldTimers(float deltaTime)
+    {
+        UpdateActiveShield(deltaTime);
+
+        if (_shieldInvulnerableTimer > 0f)
+        {
+            _shieldInvulnerableTimer -= deltaTime;
+
+            if (_shieldInvulnerableTimer < 0f)
+            {
+                _shieldInvulnerableTimer = 0f;
+            }
+        }
+
+        if (_shieldExplosionTimer > 0f)
+        {
+            _shieldExplosionTimer -= deltaTime;
+
+            if (_shieldExplosionTimer < 0f)
+            {
+                _shieldExplosionTimer = 0f;
+            }
+        }
+    }
+
+    private void UpdateSpawners(float deltaTime)
+    {
+        _obstacleSpawner.Update(
+            deltaTime,
+            _obstacles,
+            _scoreManager.Score,
+            _difficultySettings
+        );
+
+        _enemySpawner.Update(
+            deltaTime,
+            _enemies,
+            _scoreManager.Score,
+            _difficultySettings
+        );
+    }
+
+    private void UpdateBoss(float deltaTime)
+    {
+        if (!_bossSpawnedThisRun && _scoreManager.Score >= 1000)
+        {
+            _bossSpawnedThisRun = true;
+
+            _boss = new Boss
+            {
+                Position = new Vector2(
+                    GameSettings.ScreenWidth - 180,
+                    GameSettings.PlayAreaTop + 40
+                )
+            };
+        }
+
+        if (_boss == null)
+        {
+            return;
+        }
+
+        _boss.Update(deltaTime);
+
+        _bossShotTimer += deltaTime;
+
+        if (_bossShotTimer < 1.8f)
+        {
+            return;
+        }
+
+        _bossShotTimer = 0f;
+
+        _enemyBullets.Add(new EnemyBullet(
+            new Vector2(
+                _boss.Position.X,
+                _boss.Position.Y + _boss.Height / 2f
+            ),
+            420f
+        ));
+    }
+
+    private void ResetRunFeatures()
+    {
+        _buffs.Clear();
+
+        _hasShield = false;
+        _shieldTimer = 0f;
+        _shieldInvulnerableTimer = 0f;
+        _shieldExplosionCenter = Vector2.Zero;
+        _shieldExplosionTimer = 0f;
+        _shieldDropFailCount = 0;
+
+        _boss = null;
+        _bossSpawnedThisRun = false;
+        _bossShotTimer = 0f;
+
+        _lastDashDirection = Vector2.UnitX;
+        _dashVelocity = Vector2.Zero;
+        _dashActiveTimer = 0f;
+        _dashCooldownTimer = 0f;
+        _dashInvulnerableTimer = 0f;
+    }
+
+    private void UpdateWindowTitle()
+    {
+        Window.Title =
+            $"Score: {_scoreManager.Score} | " +
+            $"Lives: {_gameState.Lives} | " +
+            $"Best: {_scoreManager.HighScore} | " +
+            $"Mode: {_difficultySettings.Name}";
+    }
+
     // BUFF CHANGE:
     // Spawns and updates Energy Core pickups during gameplay.
     private void UpdateBuffs(float deltaTime)
     {
-        UpdateActiveShield(deltaTime);
-
         for (int i = _buffs.Count - 1; i >= 0; i--)
         {
             BuffPickup buff = _buffs[i];
@@ -528,8 +586,6 @@ public sealed class Game1 : Game
             if (IsRectNearPoint(buff.GetBounds(), droneCenter, 70f))
             {
                 ActivateShield();
-
-                // Refill player shots when picking up the shield buff.
                 _shotCharges = GameSettings.MaxShotCharges;
 
                 _buffs.RemoveAt(i);
@@ -551,6 +607,8 @@ public sealed class Game1 : Game
         // Shield does not stack.
         // Picking up another shield only refreshes the timer.
         _shieldTimer = ShieldDurationSeconds;
+
+        _shieldPickupsThisRun++;
     }
 
     private void UpdateActiveShield(float deltaTime)
@@ -559,6 +617,9 @@ public sealed class Game1 : Game
         {
             return;
         }
+
+        float activeTimeThisFrame = Math.Min(deltaTime, _shieldTimer);
+        _shieldActiveSecondsThisRun += activeTimeThisFrame;
 
         _shieldTimer -= deltaTime;
 
@@ -613,37 +674,20 @@ public sealed class Game1 : Game
 
     private void StartNewGame()
     {
-
-        // ML-2 POLISH:
-        // Reset bot smoothing state when a new run starts.
         _botPlayer.Reset();
 
-        // ML-1 CHANGE:
-        // Reset survival timer for the new run.
         _survivalSeconds = 0f;
-
-        // ML-5 CHANGE:
-        // Reset auto replay timer for the new run.
         _botAutoReplayTimer = -1f;
-
-        // ML-1 CHANGE:
-        // Reset feedback flag for the new run.
         _hasSavedMlFeedback = false;
 
-        // ML-2 POLISH:
-        // If bot is enabled before the run starts,
-        // this run is counted as a bot run.
         _wasBotUsedThisRun = _isBotEnabled;
 
-        // ML-2 POLISH:
-        // Bot chooses a random difficulty at the start of every bot run.
         if (_isBotEnabled)
         {
             SelectRandomDifficultyForBotRun();
         }
 
         _gameState.StartGame(_difficultySettings.StartingLives);
-
         _scoreManager.ResetScore();
 
         _drone.Reset(
@@ -657,25 +701,7 @@ public sealed class Game1 : Game
         _enemyBullets.Clear();
         _shields.Clear();
 
-        _buffs.Clear();
-
-        _buffs.Clear();
-        _hasShield = false;
-        _shieldTimer = 0f;
-
-        _boss = null;
-        _bossSpawnedThisRun = false;
-        _bossShotTimer = 0f;
-
-        _boss = null;
-        _bossSpawnedThisRun = false;
-        _bossShotTimer = 0f;
-
-        _lastDashDirection = Vector2.UnitX;
-        _dashVelocity = Vector2.Zero;
-        _dashActiveTimer = 0f;
-        _dashCooldownTimer = 0f;
-        _dashInvulnerableTimer = 0f;
+        ResetRunFeatures();
 
         _obstacleSpawner.Reset(_difficultySettings);
         _enemySpawner.Reset(_difficultySettings);
@@ -683,10 +709,22 @@ public sealed class Game1 : Game
         _collisionCooldown = 0f;
         _screenShakeTimer = 0f;
 
-        // LEVEL 4C CHANGE:
-        // Start each run with full charges so the player has emergency shots.
         _shotCharges = GameSettings.MaxShotCharges;
         _shotRechargeTimer = 0f;
+
+        _dashUsesThisRun = 0;
+        _shieldPickupsThisRun = 0;
+        _shieldActiveSecondsThisRun = 0f;
+
+        _hasShield = false;
+        _shieldTimer = 0f;
+        _shieldInvulnerableTimer = 0f;
+        _shieldExplosionTimer = 0f;
+        _shieldDropFailCount = 0;
+
+        _dashUsesThisRun = 0;
+        _shieldPickupsThisRun = 0;
+        _shieldActiveSecondsThisRun = 0f;
     }
 
     private void SetDifficulty(DifficultyLevel level)
@@ -842,6 +880,8 @@ public sealed class Game1 : Game
         // DASH CHANGE:
         // The drone is briefly invincible during dash.
         _dashInvulnerableTimer = DashInvulnerableSeconds;
+
+        _dashUsesThisRun++;
     }
 
     private void ApplyDash(float deltaTime)
@@ -1544,38 +1584,37 @@ public sealed class Game1 : Game
         );
 
         DrawBackground();
-        DrawActiveShieldAura();
-        DrawDrone();
-        DrawShieldExplosionAura();
-        DrawObstacles();
-        DrawBuffs();
 
-        // LEVEL 4A CHANGE:
-        // Draw enemies and shots after obstacles.
+        if (_gameState.Current == GameStateType.Playing)
+        {
+            DrawBuffs();
+        }
+
+        DrawShieldExplosionAura();
+
+        DrawObstacles();
         DrawEnemies();
         DrawEnemyBullets();
-        // BOSS CHANGE:
-        // Draw boss if it has spawned.
-        // Put it before player shots so shots appear on top of the boss.
+
         if (_boss != null)
         {
             _boss.Draw(_spriteBatch!, _pixel!);
         }
 
-        DrawShots();
+        DrawActiveShieldAura();
+        DrawDrone();
 
+        DrawShots();
         DrawShields();
 
         _particles.Draw(_spriteBatch, _pixel);
 
-        // UI POLISH:
-        // Do not show gameplay HUD on the Start screen.
-        // Start screen should be clean and focused on the menu.
         if (_gameState.Current != GameStateType.Start)
         {
             DrawHud();
             DrawShieldStatusCorner();
         }
+
         DrawStateOverlay();
 
         _spriteBatch.End();
@@ -1626,7 +1665,7 @@ public sealed class Game1 : Game
 
         if (_gameState.Current == GameStateType.Start)
         {
-                DrawStartMenuOverlay();
+            DrawStartMenuOverlay();
         }
 
         if (_gameState.Current == GameStateType.Fail)
@@ -1702,16 +1741,6 @@ public sealed class Game1 : Game
             {
                 restartText = "SAVE FEEDBACK FIRST";
             }
-
-            PixelText.DrawCenteredText(
-                _spriteBatch!,
-                _pixel!,
-                restartText,
-                GameSettings.ScreenWidth,
-                355,
-                2,
-                Color.White
-            );
 
             PixelText.DrawCenteredText(
                 _spriteBatch!,
@@ -1963,7 +1992,7 @@ public sealed class Game1 : Game
 
     private void DrawBackground()
     {
-            _starfield.Draw(_spriteBatch!, _pixel!);
+        _starfield.Draw(_spriteBatch!, _pixel!);
     }
 
     private void DrawHud()
@@ -2261,189 +2290,8 @@ public sealed class Game1 : Game
         );
     }
 
-    private void DrawLeftHudCard(Rectangle card)
-    {
-        int x = card.X + 18;
-        int y = card.Y + 14;
 
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"SCORE {_scoreManager.Score}",
-            new Vector2(x, y),
-            2,
-            Color.White
-        );
 
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"MODE {_difficultySettings.Name}",
-            new Vector2(x, y + 34),
-            1,
-            Color.White
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"OBSTACLES {_obstacleSpawner.CurrentMaxObstacles}/{_difficultySettings.MaxObstacles}",
-            new Vector2(x, y + 62),
-            1,
-            new Color(255, 214, 10)
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"ENEMIES {_enemySpawner.CurrentMaxEnemies}/{_difficultySettings.MaxEnemies}",
-            new Vector2(x, y + 90),
-            1,
-            new Color(255, 140, 40)
-        );
-    }
-
-    private void DrawCenterHudCard(Rectangle card)
-    {
-        int centerX = card.X + card.Width / 2;
-        int x = card.X + 36;
-        int y = card.Y + 14;
-
-        PixelText.DrawCenteredText(
-            _spriteBatch!,
-            _pixel!,
-            $"LIVES {_gameState.Lives}",
-            GameSettings.ScreenWidth,
-            y,
-            2,
-            new Color(0, 217, 255)
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            "OBSTACLE PRESSURE",
-            new Vector2(x, y + 42),
-            1,
-            new Color(255, 214, 10)
-        );
-
-        DrawProgressBar(
-            x: x,
-            y: y + 64,
-            width: card.Width - 72,
-            height: 12,
-            progress: _obstacleSpawner.ProgressPercent
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            "ENEMY PRESSURE",
-            new Vector2(x, y + 86),
-            1,
-            new Color(255, 140, 40)
-        );
-
-        DrawProgressBar(
-            x: x,
-            y: y + 108,
-            width: card.Width - 72,
-            height: 12,
-            progress: _enemySpawner.ProgressPercent
-        );
-    }
-
-    private void DrawRightHudCard(Rectangle card)
-    {
-        int x = card.X + 18;
-        int y = card.Y + 14;
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"BEST {_scoreManager.HighScore}",
-            new Vector2(x, y),
-            1,
-            new Color(255, 214, 10)
-        );
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            _isBotEnabled ? "BOT ON" : "BOT OFF",
-            new Vector2(x, y + 24),
-            1,
-            _isBotEnabled
-                ? new Color(0, 217, 255)
-                : Color.White
-        );
-
-        if (_wasBotUsedThisRun)
-        {
-            PixelText.DrawText(
-                _spriteBatch!,
-                _pixel!,
-                "NO BEST",
-                new Vector2(x + 150, y + 24),
-                1,
-                new Color(255, 80, 100)
-            );
-        }
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            $"SHOT {_shotCharges}/{GameSettings.MaxShotCharges}",
-            new Vector2(x, y + 56),
-            1,
-            new Color(0, 217, 255)
-        );
-
-        float rechargeProgress = _shotCharges >= GameSettings.MaxShotCharges
-            ? 1f
-            : MathHelper.Clamp(
-                _shotRechargeTimer / GameSettings.ShotRechargeSeconds,
-                0f,
-                1f
-            );
-
-        DrawProgressBar(
-            x: x,
-            y: y + 78,
-            width: card.Width - 36,
-            height: 12,
-            progress: rechargeProgress
-        );
-
-        string shotInstructionText = _shotCharges > 0
-            ? "PRESS J TO SHOOT"
-            : "RECHARGING";
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            shotInstructionText,
-            new Vector2(x, y + 100),
-            1,
-            _shotCharges > 0
-                ? new Color(255, 214, 10)
-                : new Color(255, 80, 100)
-        );
-
-        string mlHudText = string.IsNullOrWhiteSpace(FormatMlConfidenceText())
-            ? $"ML {FormatMlPredictionText()}"
-            : $"ML {FormatMlPredictionText()} {FormatMlConfidenceText()}";
-
-        PixelText.DrawText(
-            _spriteBatch!,
-            _pixel!,
-            mlHudText,
-            new Vector2(x, y + 128),
-            1,
-            GetMlPredictionColor()
-        );
-    }
 
     // ML-6 POLISH:
     // Make ML labels easier to read in the HUD.
@@ -2724,17 +2572,6 @@ public sealed class Game1 : Game
     // UI POLISH:
     // Larger panel for the start menu.
     // This gives enough room for difficulty, shooting, bot, and ML instructions.
-    private void DrawStartPanel(Color color)
-    {
-        var panel = new Rectangle(
-            GameSettings.ScreenWidth / 2 - 390,
-            GameSettings.ScreenHeight / 2 - 200,
-            780,
-            400
-        );
-
-        DrawRect(panel, color);
-    }
 
     private void DrawProgressBar(int x, int y, int width, int height, float progress)
     {
@@ -2852,6 +2689,21 @@ public sealed class Game1 : Game
         _lastActivePlayerShots = _shots.Count;
         _lastShotCharges = _shotCharges;
         _lastActiveShields = _shields.Count;
+
+        _lastHasShield = _hasShield ? 1f : 0f;
+        _lastShieldTimeLeft = _hasShield ? _shieldTimer : 0f;
+        _lastShieldPickupsThisRun = _shieldPickupsThisRun;
+        _lastShieldActiveSecondsThisRun = _shieldActiveSecondsThisRun;
+
+        _lastDashCooldown = _dashCooldownTimer;
+        _lastDashReady = _dashCooldownTimer <= 0.05f ? 1f : 0f;
+        _lastDashInvulnerable = IsDashInvulnerable() ? 1f : 0f;
+        _lastDashUsesThisRun = _dashUsesThisRun;
+
+        _lastBossActive = _boss != null ? 1f : 0f;
+        _lastBossHealth = _boss?.Health ?? 0f;
+
+        _lastBuffsOnScreen = _buffs.Count;
     }
 
     // ML-1 CHANGE:
@@ -3036,6 +2888,21 @@ public sealed class Game1 : Game
             ShotCharges = _shotCharges,
             ActiveShields = _shields.Count,
 
+            HasShield = _hasShield ? 1f : 0f,
+            ShieldTimeLeft = _hasShield ? _shieldTimer : 0f,
+            ShieldPickupsThisRun = _shieldPickupsThisRun,
+            ShieldActiveSecondsThisRun = _shieldActiveSecondsThisRun,
+
+            DashCooldown = _dashCooldownTimer,
+            DashReady = _dashCooldownTimer <= 0.05f ? 1f : 0f,
+            DashInvulnerable = IsDashInvulnerable() ? 1f : 0f,
+            DashUsesThisRun = _dashUsesThisRun,
+
+            BossActive = _boss != null ? 1f : 0f,
+            BossHealth = _boss?.Health ?? 0f,
+
+            BuffsOnScreen = _buffs.Count,
+
             Difficulty = _difficultySettings.Name,
             ControlMode = _isBotEnabled ? "Bot" : "Human",
 
@@ -3067,29 +2934,6 @@ public sealed class Game1 : Game
     // ML-7 POLISH:
     // Blocks TooEasy only when the player is clearly under real danger.
     // This version is less aggressive than the previous one.
-    private bool ShouldBlockTooEasyPrediction()
-    {
-        bool veryLowShotCharges =
-            _shotCharges <= 1;
-
-        bool obstaclePressureVeryHigh =
-            _obstacleSpawner.ProgressPercent >= 0.95f;
-
-        bool enemyPressureVeryHigh =
-            _enemySpawner.ProgressPercent >= 0.95f;
-
-        bool manyEnemyBullets =
-            _enemyBullets.Count >= 4;
-
-        bool enemyLimitAlmostFull =
-            _enemies.Count >= _enemySpawner.CurrentMaxEnemies;
-
-        return veryLowShotCharges &&
-               (obstaclePressureVeryHigh ||
-                enemyPressureVeryHigh ||
-                manyEnemyBullets ||
-                enemyLimitAlmostFull);
-    }
 
     // ML-7 CHANGE:
     // Convert model confidence from 0.0-1.0 to percentage text.
@@ -3179,6 +3023,21 @@ public sealed class Game1 : Game
             ActivePlayerShots = _lastActivePlayerShots,
             ShotCharges = _lastShotCharges,
             ActiveShields = _lastActiveShields,
+
+            HasShield = _lastHasShield,
+            ShieldTimeLeft = _lastShieldTimeLeft,
+            ShieldPickupsThisRun = _lastShieldPickupsThisRun,
+            ShieldActiveSecondsThisRun = _lastShieldActiveSecondsThisRun,
+
+            DashCooldown = _lastDashCooldown,
+            DashReady = _lastDashReady,
+            DashInvulnerable = _lastDashInvulnerable,
+            DashUsesThisRun = _lastDashUsesThisRun,
+
+            BossActive = _lastBossActive,
+            BossHealth = _lastBossHealth,
+
+            BuffsOnScreen = _lastBuffsOnScreen,
 
             Difficulty = _difficultySettings.Name,
             ControlMode = _wasBotUsedThisRun ? "Bot" : "Human",
