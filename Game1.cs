@@ -182,12 +182,26 @@ public sealed class Game1 : Game
 
     private const float DashDistance = 135f;
     private const float DashDurationSeconds = 0.12f;
-    private const float DashCooldownSeconds = 2.00f;
+    private const float DashCooldownSeconds = 1.75f;
     private const float DashInvulnerableSeconds = 0.18f;
+
+    private float _respawnInvulnerableTimer;
+
+    private const float RespawnInvulnerableSeconds = 2.75f;
+    private const float RespawnBlinkIntervalSeconds = 0.10f;
+
+    private readonly List<DashTrail> _dashTrails = new();
 
     private Boss? _boss;
     private bool _bossSpawnedThisRun;
     private float _bossShotTimer;
+
+    private bool _bossWarningShownThisRun;
+    private float _bossWarningTimer;
+
+    private const int BossWarningScore = 850;
+    private const int BossSpawnScore = 1000;
+    private const float BossWarningSeconds = 2.5f;
 
     // ML-6 CHANGE:
     // The trained ML model is loaded into the game.
@@ -399,6 +413,10 @@ public sealed class Game1 : Game
         _survivalSeconds += deltaTime;
 
         UpdateDashTimers(deltaTime);
+        UpdateRespawnInvulnerability(deltaTime);
+
+        UpdateDashTrails(deltaTime);
+
         UpdateShieldTimers(deltaTime);
 
         if (_collisionCooldown > 0f)
@@ -430,6 +448,19 @@ public sealed class Game1 : Game
         CheckCollision();
 
         UpdateWindowTitle();
+    }
+
+    private void UpdateDashTrails(float deltaTime)
+    {
+        for (int i = _dashTrails.Count - 1; i >= 0; i--)
+        {
+            _dashTrails[i].Timer -= deltaTime;
+
+            if (_dashTrails[i].Timer <= 0f)
+            {
+                _dashTrails.RemoveAt(i);
+            }
+        }
     }
 
     private void UpdateDashTimers(float deltaTime)
@@ -499,7 +530,25 @@ public sealed class Game1 : Game
 
     private void UpdateBoss(float deltaTime)
     {
-        if (!_bossSpawnedThisRun && _scoreManager.Score >= 1000)
+        if (!_bossWarningShownThisRun &&
+            !_bossSpawnedThisRun &&
+            _scoreManager.Score >= BossWarningScore)
+        {
+            _bossWarningShownThisRun = true;
+            _bossWarningTimer = BossWarningSeconds;
+        }
+
+        if (_bossWarningTimer > 0f)
+        {
+            _bossWarningTimer -= deltaTime;
+
+            if (_bossWarningTimer < 0f)
+            {
+                _bossWarningTimer = 0f;
+            }
+        }
+
+        if (!_bossSpawnedThisRun && _scoreManager.Score >= BossSpawnScore)
         {
             _bossSpawnedThisRun = true;
 
@@ -551,6 +600,8 @@ public sealed class Game1 : Game
         _boss = null;
         _bossSpawnedThisRun = false;
         _bossShotTimer = 0f;
+        _bossWarningShownThisRun = false;
+        _bossWarningTimer = 0f;
 
         _lastDashDirection = Vector2.UnitX;
         _dashVelocity = Vector2.Zero;
@@ -702,6 +753,8 @@ public sealed class Game1 : Game
         _shields.Clear();
 
         ResetRunFeatures();
+
+        _dashTrails.Clear();
 
         _obstacleSpawner.Reset(_difficultySettings);
         _enemySpawner.Reset(_difficultySettings);
@@ -892,6 +945,34 @@ public sealed class Game1 : Game
         }
 
         _drone.MoveBy(_dashVelocity * deltaTime);
+
+        Rectangle droneBox = _drone.GetBounds();
+
+        Vector2 droneCenter = new Vector2(
+            droneBox.X + droneBox.Width / 2f,
+            droneBox.Y + droneBox.Height / 2f
+        );
+
+        Vector2 dashDirection = _dashVelocity;
+
+        if (dashDirection != Vector2.Zero)
+        {
+            dashDirection.Normalize();
+        }
+        else
+        {
+            dashDirection = _lastDashDirection;
+        }
+
+        Vector2 trailStart = droneCenter - dashDirection * 120f;
+        Vector2 trailEnd = droneCenter - dashDirection * 8f;
+
+        _dashTrails.Add(new DashTrail
+        {
+            From = trailStart,
+            To = trailEnd,
+            Timer = DashTrail.Lifetime
+        });
 
         _dashActiveTimer -= deltaTime;
 
@@ -1310,7 +1391,7 @@ public sealed class Game1 : Game
                     _boss.Position.Y + _boss.Height / 2f
                 );
 
-                _boss.Health--;
+                _boss.TakeDamage(1);
 
                 _particles.EmitCrash(hitPosition);
 
@@ -1320,7 +1401,8 @@ public sealed class Game1 : Game
 
                 if (_boss.Health <= 0)
                 {
-                    _scoreManager.AddScore(500);
+                    _scoreManager.AddScore(1000);
+                    _particles.EmitCrash(hitPosition);
                     _boss = null;
                 }
             }
@@ -1367,6 +1449,11 @@ public sealed class Game1 : Game
 
     private void CheckCollision()
     {
+
+        if (IsRespawnInvulnerable())
+        {
+            return;
+        }
 
         if (IsDashInvulnerable())
         {
@@ -1434,34 +1521,8 @@ public sealed class Game1 : Game
             return;
         }
 
-        Vector2 crashPosition = new Vector2(
-            _drone.Position.X + _drone.Width / 2f,
-            _drone.Position.Y + _drone.Height / 2f
-        );
-
-        _particles.EmitCrash(crashPosition);
-        _screenShakeTimer = 0.25f;
-
-        _gameState.LoseLife();
-
-        _obstacles.Clear();
-        _enemies.Clear();
-        _shots.Clear();
-        _enemyBullets.Clear();
-        _shields.Clear();
-
-        _drone.Reset(
-            GameSettings.StartDroneX,
-            GameSettings.StartDroneY
-        );
-
-        _collisionCooldown = GameSettings.CollisionCooldownSeconds;
-
-        if (_gameState.Current == GameStateType.Fail &&
-            !_wasBotUsedThisRun)
-        {
-            _scoreManager.SaveHighScoreIfNeeded();
-        }
+        HandlePlayerHit();
+        return;
     }
 
     private void TriggerShieldExplosion()
@@ -1487,6 +1548,44 @@ public sealed class Game1 : Game
         DestroyEnemyShieldsNear(explosionCenter, ShieldExplosionRadius);
 
         Window.Title = "Shield exploded - game continues";
+    }
+
+    private void HandlePlayerHit()
+    {
+        Vector2 crashPosition = new Vector2(
+            _drone.Position.X + _drone.Width / 2f,
+            _drone.Position.Y + _drone.Height / 2f
+        );
+
+        _particles.EmitCrash(crashPosition);
+        _screenShakeTimer = 0.12f;
+
+        _gameState.LoseLife();
+
+        // Stop dash movement after getting hit.
+        _dashActiveTimer = 0f;
+        _dashVelocity = Vector2.Zero;
+        _dashInvulnerableTimer = 0f;
+
+        if (_gameState.Current == GameStateType.Fail)
+        {
+            _hasShield = false;
+            _shieldTimer = 0f;
+            _shieldInvulnerableTimer = 0f;
+            _respawnInvulnerableTimer = 0f;
+
+            if (!_wasBotUsedThisRun)
+            {
+                _scoreManager.SaveHighScoreIfNeeded();
+            }
+
+            return;
+        }
+
+        // Do NOT reset the drone position here.
+        // The drone stays where it got hit.
+        // It only blinks and becomes temporarily invincible.
+        _respawnInvulnerableTimer = RespawnInvulnerableSeconds;
     }
 
     private void DestroyObstaclesNear(Vector2 center, float radius)
@@ -1564,6 +1663,26 @@ public sealed class Game1 : Game
         return distanceSquared <= radius * radius;
     }
 
+    private void UpdateRespawnInvulnerability(float deltaTime)
+    {
+        if (_respawnInvulnerableTimer <= 0f)
+        {
+            return;
+        }
+
+        _respawnInvulnerableTimer -= deltaTime;
+
+        if (_respawnInvulnerableTimer < 0f)
+        {
+            _respawnInvulnerableTimer = 0f;
+        }
+    }
+
+    private bool IsRespawnInvulnerable()
+    {
+        return _respawnInvulnerableTimer > 0f;
+    }
+
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(new Color(12, 18, 32));
@@ -1601,8 +1720,12 @@ public sealed class Game1 : Game
             _boss.Draw(_spriteBatch!, _pixel!);
         }
 
-        DrawActiveShieldAura();
-        DrawDrone();
+        if (_gameState.Current == GameStateType.Playing)
+        {
+            DrawDashTrails();
+            DrawActiveShieldAura();
+            DrawDroneWithInvincibilityBlink();
+        }
 
         DrawShots();
         DrawShields();
@@ -1612,6 +1735,12 @@ public sealed class Game1 : Game
         if (_gameState.Current != GameStateType.Start)
         {
             DrawHud();
+        }
+
+        DrawBossIncomingWarning();
+
+        if (_gameState.Current == GameStateType.Playing)
+        {
             DrawShieldStatusCorner();
         }
 
@@ -1620,6 +1749,21 @@ public sealed class Game1 : Game
         _spriteBatch.End();
 
         base.Draw(gameTime);
+    }
+
+    private void DrawDroneWithInvincibilityBlink()
+    {
+        if (IsRespawnInvulnerable())
+        {
+            int blinkFrame = (int)(_respawnInvulnerableTimer / RespawnBlinkIntervalSeconds);
+
+            if (blinkFrame % 2 == 0)
+            {
+                return;
+            }
+        }
+
+        DrawDrone();
     }
 
     private void DrawStateOverlay()
@@ -1670,14 +1814,14 @@ public sealed class Game1 : Game
 
         if (_gameState.Current == GameStateType.Fail)
         {
-            DrawPanel(new Color(120, 30, 30, 220));
+            DrawGameOverPanel();
 
             PixelText.DrawCenteredText(
                 _spriteBatch!,
                 _pixel!,
                 "GAME OVER",
                 GameSettings.ScreenWidth,
-                185,
+                260,
                 5,
                 Color.White
             );
@@ -1687,7 +1831,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 $"SCORE {_scoreManager.Score}",
                 GameSettings.ScreenWidth,
-                255,
+                325,
                 3,
                 new Color(255, 214, 10)
             );
@@ -1712,7 +1856,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 feedbackText,
                 GameSettings.ScreenWidth,
-                310,
+                405,
                 2,
                 _hasSavedMlFeedback
                     ? new Color(0, 217, 255)
@@ -1747,7 +1891,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 restartText,
                 GameSettings.ScreenWidth,
-                355,
+                450,
                 2,
                 Color.White
             );
@@ -1757,7 +1901,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "PRESS ENTER TO RESTART",
                 GameSettings.ScreenWidth,
-                390,
+                490,
                 3,
                 new Color(0, 217, 255)
             );
@@ -1797,6 +1941,47 @@ public sealed class Game1 : Game
                 new Color(0, 217, 255)
             );
         }
+    }
+
+    private void DrawGameOverPanel()
+    {
+        int panelWidth = 600;
+        int panelHeight = 245;
+
+        int panelX = GameSettings.ScreenWidth / 2 - panelWidth / 2;
+        int panelY = 375;
+
+        Rectangle panel = new Rectangle(
+            panelX,
+            panelY,
+            panelWidth,
+            panelHeight
+        );
+
+        DrawRect(
+            panel,
+            new Color(120, 30, 30, 215)
+        );
+
+        DrawRect(
+            new Rectangle(panel.X, panel.Y, panel.Width, 2),
+            new Color(180, 70, 70, 230)
+        );
+
+        DrawRect(
+            new Rectangle(panel.X, panel.Bottom - 2, panel.Width, 2),
+            new Color(180, 70, 70, 230)
+        );
+
+        DrawRect(
+            new Rectangle(panel.X, panel.Y, 2, panel.Height),
+            new Color(180, 70, 70, 230)
+        );
+
+        DrawRect(
+            new Rectangle(panel.Right - 2, panel.Y, 2, panel.Height),
+            new Color(180, 70, 70, 230)
+        );
     }
 
     private void DrawShieldExplosionAura()
@@ -2003,7 +2188,7 @@ public sealed class Game1 : Game
             new Color(6, 10, 20, 255)
         );
 
-        // A clean divider line between HUD and play area.
+        // Clean divider between HUD and play area.
         DrawRect(
             new Rectangle(0, GameSettings.HudHeight - 2, GameSettings.ScreenWidth, 2),
             new Color(50, 80, 120, 255)
@@ -2017,18 +2202,6 @@ public sealed class Game1 : Game
         int startX = (GameSettings.ScreenWidth - totalWidth) / 2;
         int panelY = 18;
 
-        if (_boss != null)
-        {
-            PixelText.DrawText(
-                _spriteBatch!,
-                _pixel!,
-                $"BOSS HP {_boss.Health}",
-                new Vector2(GameSettings.ScreenWidth / 2 - 80, GameSettings.HudHeight + 10),
-                1,
-                new Color(255, 80, 180)
-            );
-        }
-
         Rectangle leftPanel = new Rectangle(startX, panelY, panelWidth, panelHeight);
         Rectangle centerPanel = new Rectangle(startX + panelWidth + gap, panelY, panelWidth, panelHeight);
         Rectangle rightPanel = new Rectangle(startX + (panelWidth + gap) * 2, panelY, panelWidth, panelHeight);
@@ -2040,6 +2213,9 @@ public sealed class Game1 : Game
         DrawLeftHudPanel(leftPanel);
         DrawCenterHudPanel(centerPanel);
         DrawRightHudPanel(rightPanel);
+
+        int bossBarY = GameSettings.HudHeight + 35;
+        DrawBossHpBar(bossBarY);
     }
 
     private void DrawPanel(Rectangle rect)
@@ -2157,6 +2333,7 @@ public sealed class Game1 : Game
             12,
             _enemySpawner.ProgressPercent
         );
+
     }
 
     private void DrawRightHudPanel(Rectangle panel)
@@ -2290,8 +2467,63 @@ public sealed class Game1 : Game
         );
     }
 
+    private void DrawDashTrails()
+    {
+        foreach (DashTrail trail in _dashTrails)
+        {
+            float lifeProgress = MathHelper.Clamp(
+                trail.Timer / DashTrail.Lifetime,
+                0f,
+                1f
+            );
 
+            float lifeFade = lifeProgress * lifeProgress;
 
+            int pieces = 22;
+
+            for (int i = 0; i < pieces; i++)
+            {
+                float t = i / (float)(pieces - 1);
+
+                Vector2 position = Vector2.Lerp(
+                    trail.From,
+                    trail.To,
+                    t
+                );
+
+                // Far from ship = more transparent.
+                // Near ship = more visible.
+                float nearShipFade = t * t;
+
+                int glowAlpha = (int)(55 * lifeFade * nearShipFade);
+                int coreAlpha = (int)(95 * lifeFade * nearShipFade);
+
+                int glowRadius = (int)MathHelper.Lerp(
+                    1f,
+                    7f,
+                    t
+                );
+
+                int coreRadius = (int)MathHelper.Lerp(
+                    1f,
+                    3f,
+                    t
+                );
+
+                DrawFilledCircle(
+                    position,
+                    glowRadius,
+                    new Color(0, 217, 255, glowAlpha)
+                );
+
+                DrawFilledCircle(
+                    position,
+                    coreRadius,
+                    new Color(255, 255, 255, coreAlpha)
+                );
+            }
+        }
+    }
 
     // ML-6 POLISH:
     // Make ML labels easier to read in the HUD.
@@ -2595,6 +2827,90 @@ public sealed class Game1 : Game
         );
     }
 
+    private void DrawBossIncomingWarning()
+    {
+        if (_bossWarningTimer <= 0f ||
+            _gameState.Current != GameStateType.Playing)
+        {
+            return;
+        }
+
+        float pulse = 0.5f + 0.5f * MathF.Sin(_bossWarningTimer * 10f);
+
+        Color warningColor = pulse > 0.5f
+            ? new Color(255, 80, 220)
+            : new Color(255, 220, 250);
+
+        PixelText.DrawCenteredText(
+            _spriteBatch!,
+            _pixel!,
+            "BOSS INCOMING",
+            GameSettings.ScreenWidth,
+            GameSettings.HudHeight + 85,
+            3,
+            warningColor
+        );
+    }
+
+    private void DrawBossHpBar(int y)
+    {
+        if (_boss == null || _gameState.Current != GameStateType.Playing)
+        {
+            return;
+        }
+
+        int barWidth = 420;
+        int barHeight = 18;
+        int x = (GameSettings.ScreenWidth - barWidth) / 2;
+
+        float hpPercent = MathHelper.Clamp(
+            _boss.Health / (float)_boss.MaxHealth,
+            0f,
+            1f
+        );
+
+        PixelText.DrawText(
+            _spriteBatch!,
+            _pixel!,
+            $"BOSS HP {_boss.Health}/{_boss.MaxHealth}",
+            new Vector2(x, y - 18),
+            1,
+            new Color(255, 120, 220)
+        );
+
+        DrawRect(
+            new Rectangle(x, y, barWidth, barHeight),
+            new Color(30, 20, 40)
+        );
+
+        DrawRect(
+            new Rectangle(x + 2, y + 2, barWidth - 4, barHeight - 4),
+            new Color(70, 40, 80)
+        );
+
+        DrawRect(
+            new Rectangle(x + 2, y + 2, (int)((barWidth - 4) * hpPercent), barHeight - 4),
+            new Color(255, 80, 200)
+        );
+
+        DrawRect(
+            new Rectangle(x, y, barWidth, 2),
+            Color.White
+        );
+        DrawRect(
+            new Rectangle(x, y + barHeight - 2, barWidth, 2),
+            Color.White
+        );
+        DrawRect(
+            new Rectangle(x, y, 2, barHeight),
+            Color.White
+        );
+        DrawRect(
+            new Rectangle(x + barWidth - 2, y, 2, barHeight),
+            Color.White
+        );
+    }
+
     private Vector2 GetScreenShakeOffset()
     {
         if (_screenShakeTimer <= 0f)
@@ -2613,6 +2929,31 @@ public sealed class Game1 : Game
     private void DrawRect(Rectangle rectangle, Color color)
     {
         _spriteBatch!.Draw(_pixel!, rectangle, color);
+    }
+
+    private void DrawLine(Vector2 start, Vector2 end, float thickness, Color color)
+    {
+        Vector2 edge = end - start;
+        float length = edge.Length();
+
+        if (length <= 0f)
+        {
+            return;
+        }
+
+        float angle = MathF.Atan2(edge.Y, edge.X);
+
+        _spriteBatch!.Draw(
+            _pixel!,
+            start,
+            null,
+            color,
+            angle,
+            new Vector2(0f, 0.5f),
+            new Vector2(length, thickness),
+            SpriteEffects.None,
+            0f
+        );
     }
 
     private void DrawFilledCircle(Vector2 center, int radius, Color color)
@@ -3174,6 +3515,15 @@ public sealed class Game1 : Game
             // No drop this time, so next kill has better chance.
             _shieldDropFailCount++;
         }
+    }
+
+    private sealed class DashTrail
+    {
+        public Vector2 From { get; init; }
+        public Vector2 To { get; init; }
+        public float Timer { get; set; }
+
+        public const float Lifetime = 0.24f;
     }
 
 }

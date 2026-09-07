@@ -45,17 +45,50 @@ public sealed class GameplayTrainingRow
     public float ActiveShields { get; set; }
 
     [LoadColumn(13)]
-    public string Difficulty { get; set; } = "";
+    public float HasShield { get; set; }
 
     [LoadColumn(14)]
+    public float ShieldTimeLeft { get; set; }
+
+    [LoadColumn(15)]
+    public float ShieldPickupsThisRun { get; set; }
+
+    [LoadColumn(16)]
+    public float ShieldActiveSecondsThisRun { get; set; }
+
+    [LoadColumn(17)]
+    public float DashCooldown { get; set; }
+
+    [LoadColumn(18)]
+    public float DashReady { get; set; }
+
+    [LoadColumn(19)]
+    public float DashInvulnerable { get; set; }
+
+    [LoadColumn(20)]
+    public float DashUsesThisRun { get; set; }
+
+    [LoadColumn(21)]
+    public float BossActive { get; set; }
+
+    [LoadColumn(22)]
+    public float BossHealth { get; set; }
+
+    [LoadColumn(23)]
+    public float BuffsOnScreen { get; set; }
+
+    [LoadColumn(24)]
+    public string Difficulty { get; set; } = "";
+
+    [LoadColumn(25)]
     public string ControlMode { get; set; } = "";
 
     // NOTE:
-    // Columns 15, 16, and 17 are TimeRating, ScoreRating, and AutoLabelReason.
+    // Columns 26, 27, and 28 are TimeRating, ScoreRating, and AutoLabelReason.
     // We do NOT use them as model features.
     // They are useful for debugging, but using them for training would leak the answer.
 
-    [LoadColumn(18)]
+    [LoadColumn(29)]
     public string Label { get; set; } = "";
 }
 
@@ -155,6 +188,20 @@ public static class Program
                     nameof(GameplayTrainingRow.ShotCharges),
                     nameof(GameplayTrainingRow.ActiveShields),
 
+                    nameof(GameplayTrainingRow.HasShield),
+                    nameof(GameplayTrainingRow.ShieldTimeLeft),
+                    nameof(GameplayTrainingRow.ShieldPickupsThisRun),
+                    nameof(GameplayTrainingRow.ShieldActiveSecondsThisRun),
+
+                    nameof(GameplayTrainingRow.DashCooldown),
+                    nameof(GameplayTrainingRow.DashReady),
+                    nameof(GameplayTrainingRow.DashInvulnerable),
+                    nameof(GameplayTrainingRow.DashUsesThisRun),
+
+                    nameof(GameplayTrainingRow.BossActive),
+                    nameof(GameplayTrainingRow.BossHealth),
+                    nameof(GameplayTrainingRow.BuffsOnScreen),
+
                     "DifficultyEncoded",
                     "ControlModeEncoded"
                 ))
@@ -224,6 +271,20 @@ public static class Program
             ActivePlayerShots = 0f,
             ShotCharges = 1f,
             ActiveShields = 0f,
+
+            HasShield = 0f,
+            ShieldTimeLeft = 0f,
+            ShieldPickupsThisRun = 1f,
+            ShieldActiveSecondsThisRun = 12f,
+
+            DashCooldown = 0f,
+            DashReady = 1f,
+            DashInvulnerable = 0f,
+            DashUsesThisRun = 3f,
+
+            BossActive = 0f,
+            BossHealth = 0f,
+            BuffsOnScreen = 0f,
 
             Difficulty = "Normal",
             ControlMode = "Bot"

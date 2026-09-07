@@ -47,6 +47,8 @@ Add these helper methods after UpdateDashTimers(...):
 - ResetRunFeatures(...)
 - UpdateWindowTitle(...)
 
+------------------------------------------------------------------------------------------------------------------------------------------
+
 29th August 2026
 
 ---
@@ -282,4 +284,203 @@ BuffsOnScreen
 Fix duplicated row values if row has more values than header.
 
 Reason: ML.NET training will fail or read wrong data if CSV columns do not align.
+
+---------------------------------------------------------------------------------------------------------------------------------
+
+7th September 2026
+
+---
+
+Game1.cs:
+
+HUD / UI polish:
+
+1. Reworked the HUD into a cleaner balanced layout:
+   - Left panel: Score, Mode, Obstacles, Enemies.
+   - Center panel: Lives, Obstacle Pressure, Enemy Pressure.
+   - Right panel: Best Score, Bot status, Shot charge, Dash status, ML prediction.
+   Reason: the previous HUD looked unbalanced and too spread out.
+
+2. Added a solid HUD background and divider line.
+   Reason: stars should not appear inside the HUD area, because players may think they can fly there.
+
+3. Moved Boss HP out of the boss body area and into a cleaner fixed position below the HUD.
+   Reason: boss HP beside the boss looked messy and was harder to read during gameplay.
+
+4. Tuned Boss HP position:
+   - First moved it below the HUD.
+   - Then moved it slightly up/down until it looked clean.
+   Reason: Boss HP should be visible, but not too close to the HUD divider or gameplay objects.
+
+5. Used bright pink / magenta Boss HP colors.
+   Reason: boss health must stand out clearly from yellow shot bars and orange enemies.
+
+6. Updated Game Over layout:
+   - Moved Game Over text lower.
+   - Adjusted score / feedback / restart text positions.
+   - Planned a separate Game Over panel instead of reusing the generic DrawPanel(...).
+   Reason: the old text sat too close to the HUD and overlapped badly with the red panel.
+
+Playable area / anti-farming fix:
+
+1. Added bottom play-area restriction.
+   Reason: the drone could sit near the bottom edge and farm points too safely.
+
+2. Updated drone clamping logic so the ship cannot move outside the real play area.
+   Reason: the game should force actual dodging instead of allowing a safe hiding zone.
+
+Dash feature:
+
+1. Added Space dash.
+   - Dash moves the drone a short distance in the current heading direction.
+   - Dash has invincibility frames during the dash.
+   - Dash usage is counted for ML data.
+   Reason: dash adds skill-based movement and gives the player a fair escape tool.
+
+2. Added dash cooldown support.
+   Reason: dash should be useful, but not spammable.
+
+3. Added dash HUD text:
+   - DASH READY
+   - DASH cooldown seconds
+   Reason: player should know when Space dash is available.
+
+4. Added dash trail visual.
+   - First version used ghost rectangles.
+   - Then changed to fading line / circle trail.
+   - Trail becomes more transparent farther from the ship.
+   Reason: dash should feel fast and clear without looking like copied drone blocks.
+
+Crash / invincibility frames:
+
+1. Replaced old normal crash behavior.
+   Old behavior:
+   - Showed CRASH text.
+   - Paused briefly.
+   - Cleared enemies / bullets / obstacles.
+   - Reset the drone position.
+   New behavior:
+   - Lose 1 life.
+   - Drone stays where it got hit.
+   - Drone blinks for a short time.
+   - Drone becomes temporarily invincible.
+   - Game continues.
+   Reason: losing a life should not wipe the whole screen or teleport the player.
+
+2. Added respawn invincibility timer.
+   Reason: after taking damage, the player needs a short safe window to recover.
+
+3. Added drone blink drawing method.
+   Reason: blinking makes invincibility frames visible to the player.
+
+4. Removed drone teleport after first crash.
+   Reason: keeping the drone in place feels smoother and less confusing.
+
+Shield / buff feature:
+
+1. Made shield temporary.
+   Reason: shield should be powerful, but not permanent.
+
+2. Made shield non-stacking.
+   - Picking another shield refreshes the timer.
+   - It does not add another shield layer.
+   Reason: stacking shields would make the game too easy.
+
+3. Changed shield crash behavior.
+   Old behavior:
+   - Shield collision could feel like normal crash.
+   New behavior:
+   - Shield explodes.
+   - Game continues.
+   - Nearby enemies, bullets, obstacles, and enemy shields are destroyed inside a small radius.
+   Reason: shield should feel like a useful emergency protection item.
+
+4. Added shield explosion aura.
+   Reason: player should see the real explosion radius.
+
+5. Added active shield aura around the drone.
+   Reason: player should clearly know when shield is active.
+
+6. Added shield status corner UI.
+   - Only appears while shield is active.
+   - Shows remaining shield time with a bar.
+   Reason: do not show “Shield Off”; only show useful UI when the feature is active.
+
+7. Shield buff now drops from destroying enemies or obstacles.
+   Reason: player should earn the buff through active play.
+
+8. Added progressive shield drop chance.
+   - If no shield drops, the next kill has a higher chance.
+   - Chance resets once shield drops.
+   Reason: avoids long unlucky runs where no buff appears.
+
+Boss feature:
+
+1. Added / cleaned Boss HP logic.
+   - Boss has MaxHealth.
+   - Boss has Health.
+   - Boss uses TakeDamage(...)
+   - Boss uses IsDead()
+   Reason: Game1.cs should not directly edit boss Health when Health has a private setter.
+
+2. Player shots damage the boss.
+   Reason: boss should be a real target, not only a moving obstacle.
+
+3. Boss HP bar moved below the HUD.
+   Reason: it is easier to read than a small HP bar attached to the boss.
+
+4. Added boss warning before boss spawn.
+   - Boss warning starts before the boss appears.
+   - “BOSS INCOMING” flashes below the HUD.
+   Reason: boss spawn should feel fair and not sudden.
+
+5. Boss spawn score separated from boss warning score:
+   - BossWarningScore
+   - BossSpawnScore
+   Reason: this makes boss timing easier to tune later.
+
+ML / data collection plan:
+
+1. Feature work is now paused before ML data collection.
+   Reason: if gameplay keeps changing, old ML data becomes less useful.
+
+2. Next data collection target:
+   - 20 bot runs
+   - 5 human runs
+   Reason: collect a small test batch first before farming 100+ rows.
+
+3. Important fields to verify in CSV:
+   - DashUsesThisRun
+   - ShieldPickupsThisRun
+   - ShieldActiveSecondsThisRun
+   - BossActive
+   - BossHealth
+   - BuffsOnScreen
+   Reason: if these stay mostly 0, ML cannot learn from the new mechanics.
+
+4. After collecting data, run the trainer:
+   dotnet run --project tools\DroneGameLocal.Trainer\DroneGameLocal.Trainer.csproj
+
+5. Then run the game again:
+   dotnet run
+
+Reason: retrain the model after collecting fresh data from the new gameplay version.
+
+Current status:
+
+The game now has:
+- Balanced HUD
+- Cleaner play area
+- Dash with cooldown and trail
+- Temporary shield buff
+- Shield aura and explosion aura
+- Crash invincibility frames
+- No first-crash teleport
+- Boss HP bar
+- Boss incoming warning
+- ML data columns ready for fresh collection
+
+Next step:
+
+Commit this working version, collect new ML data, then retrain the model.
 

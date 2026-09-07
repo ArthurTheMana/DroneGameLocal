@@ -34,9 +34,15 @@ public sealed class Drone {
 
     public void ClampToScreen(int screenWidth, int screenHeight)
     {
+        float minX = GameSettings.PlayAreaSidePadding;
+        float maxX = screenWidth - Width - GameSettings.PlayAreaSidePadding;
+
+        float minY = GameSettings.PlayAreaTop + 10;
+        float maxY = screenHeight - Height - GameSettings.PlayAreaBottomPadding;
+
         Position = new Vector2(
-            MathHelper.Clamp(Position.X, 0, screenWidth - Width),
-            MathHelper.Clamp(Position.Y, GameSettings.PlayAreaTop, screenHeight - Height)
+            MathHelper.Clamp(Position.X, minX, maxX),
+            MathHelper.Clamp(Position.Y, minY, maxY)
         );
     }
 

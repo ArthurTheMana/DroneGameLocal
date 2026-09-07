@@ -58,4 +58,7 @@ public static class GameSettings
     public const int HudHeight = 150;
     public const int PlayAreaTop = HudHeight + 10;
 
+    public const int PlayAreaBottomPadding = 70;
+    public const int PlayAreaSidePadding = 20;
+
 }
