@@ -196,12 +196,9 @@ public sealed class Game1 : Game
     private bool _bossSpawnedThisRun;
     private float _bossShotTimer;
 
-    private bool _bossWarningShownThisRun;
-    private float _bossWarningTimer;
+    private float _bossTimeLeft;
 
-    private const int BossWarningScore = 850;
-    private const int BossSpawnScore = 1000;
-    private const float BossWarningSeconds = 2.5f;
+    private const float BossTimeLimitSeconds = 180f;
 
     // ML-6 CHANGE:
     // The trained ML model is loaded into the game.
@@ -530,27 +527,10 @@ public sealed class Game1 : Game
 
     private void UpdateBoss(float deltaTime)
     {
-        if (!_bossWarningShownThisRun &&
-            !_bossSpawnedThisRun &&
-            _scoreManager.Score >= BossWarningScore)
-        {
-            _bossWarningShownThisRun = true;
-            _bossWarningTimer = BossWarningSeconds;
-        }
-
-        if (_bossWarningTimer > 0f)
-        {
-            _bossWarningTimer -= deltaTime;
-
-            if (_bossWarningTimer < 0f)
-            {
-                _bossWarningTimer = 0f;
-            }
-        }
-
-        if (!_bossSpawnedThisRun && _scoreManager.Score >= BossSpawnScore)
+        if (!_bossSpawnedThisRun && _scoreManager.Score >= 1000)
         {
             _bossSpawnedThisRun = true;
+            _bossTimeLeft = BossTimeLimitSeconds;
 
             _boss = new Boss
             {
@@ -563,6 +543,18 @@ public sealed class Game1 : Game
 
         if (_boss == null)
         {
+            return;
+        }
+
+        _bossTimeLeft -= deltaTime;
+
+        if (_bossTimeLeft <= 0f)
+        {
+            _boss = null;
+            _bossShotTimer = 0f;
+            _bossTimeLeft = 0f;
+
+            Window.Title = "Boss escaped";
             return;
         }
 
@@ -600,8 +592,7 @@ public sealed class Game1 : Game
         _boss = null;
         _bossSpawnedThisRun = false;
         _bossShotTimer = 0f;
-        _bossWarningShownThisRun = false;
-        _bossWarningTimer = 0f;
+        _bossTimeLeft = 0f;
 
         _lastDashDirection = Vector2.UnitX;
         _dashVelocity = Vector2.Zero;
@@ -988,6 +979,533 @@ public sealed class Game1 : Game
         return _dashInvulnerableTimer > 0f;
     }
 
+    private bool CanDashSafely(Vector2 dashDirection)
+    {
+        if (dashDirection == Vector2.Zero)
+        {
+            return false;
+        }
+
+        dashDirection.Normalize();
+
+        Rectangle currentBox = _drone.GetBounds();
+
+        Vector2 futurePosition =
+            _drone.Position + dashDirection * DashDistance;
+
+        float minX = GameSettings.PlayAreaSidePadding;
+        float maxX = GameSettings.ScreenWidth - currentBox.Width - GameSettings.PlayAreaSidePadding;
+
+        float minY = GameSettings.PlayAreaTop + 10;
+        float maxY = GameSettings.ScreenHeight - currentBox.Height - GameSettings.PlayAreaBottomPadding;
+
+        if (futurePosition.X < minX ||
+            futurePosition.X > maxX ||
+            futurePosition.Y < minY ||
+            futurePosition.Y > maxY)
+        {
+            return false;
+        }
+
+        Rectangle futureBox = new Rectangle(
+            (int)futurePosition.X,
+            (int)futurePosition.Y,
+            currentBox.Width,
+            currentBox.Height
+        );
+
+        futureBox.Inflate(10, 10);
+
+        int left = Math.Min(currentBox.Left, futureBox.Left);
+        int top = Math.Min(currentBox.Top, futureBox.Top);
+        int right = Math.Max(currentBox.Right, futureBox.Right);
+        int bottom = Math.Max(currentBox.Bottom, futureBox.Bottom);
+
+        Rectangle dashPathBox = new Rectangle(
+            left,
+            top,
+            right - left,
+            bottom - top
+        );
+
+        dashPathBox.Inflate(12, 12);
+
+        foreach (Obstacle obstacle in _obstacles)
+        {
+            if (dashPathBox.Intersects(obstacle.GetBounds()))
+            {
+                return false;
+            }
+        }
+
+        foreach (Enemy enemy in _enemies)
+        {
+            if (dashPathBox.Intersects(enemy.GetBounds()))
+            {
+                return false;
+            }
+        }
+
+        foreach (EnemyBullet bullet in _enemyBullets)
+        {
+            if (dashPathBox.Intersects(bullet.GetSweptBounds()))
+            {
+                return false;
+            }
+        }
+
+        foreach (EnergyShield shield in _shields)
+        {
+            if (dashPathBox.Intersects(shield.GetBounds()))
+            {
+                return false;
+            }
+        }
+
+        if (_boss != null && dashPathBox.Intersects(_boss.GetBounds()))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryBotDash(BotDecision decision)
+    {
+        if (_dashCooldownTimer > 0f || _dashActiveTimer > 0f)
+        {
+            return false;
+        }
+
+        Vector2 preferredDirection = decision.MovementDirection;
+
+        Vector2[] candidateDirections =
+        {
+            preferredDirection,
+            -Vector2.UnitY,
+            Vector2.UnitY,
+            -Vector2.UnitX,
+            new Vector2(-1f, -1f),
+            new Vector2(-1f, 1f),
+            new Vector2(1f, -1f),
+            new Vector2(1f, 1f)
+        };
+
+        float bestScore = float.MinValue;
+        Vector2 bestDirection = Vector2.Zero;
+
+        foreach (Vector2 rawDirection in candidateDirections)
+        {
+            if (rawDirection == Vector2.Zero)
+            {
+                continue;
+            }
+
+            Vector2 direction = rawDirection;
+            direction.Normalize();
+
+            float score = ScoreBotDashDirection(direction, preferredDirection);
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDirection = direction;
+            }
+        }
+
+        // If every dash direction is bad, don't dash.
+        if (bestDirection == Vector2.Zero || bestScore < 120f)
+        {
+            return false;
+        }
+
+        _lastDashDirection = bestDirection;
+        TryStartDash();
+
+        return true;
+    }
+
+    private float ScoreBotDashDirection(Vector2 direction, Vector2 preferredDirection)
+    {
+        Rectangle currentBox = _drone.GetBounds();
+
+        Vector2 futurePosition =
+            _drone.Position + direction * DashDistance;
+
+        float minX = 0f;
+        float maxX = GameSettings.ScreenWidth - currentBox.Width;
+
+        float minY = GameSettings.PlayAreaTop + 8f;
+        float maxY = GameSettings.ScreenHeight -
+                     currentBox.Height -
+                     GameSettings.PlayAreaBottomPadding;
+
+        if (futurePosition.X < minX ||
+            futurePosition.X > maxX ||
+            futurePosition.Y < minY ||
+            futurePosition.Y > maxY)
+        {
+            return -100000f;
+        }
+
+        Rectangle futureBox = new Rectangle(
+            (int)futurePosition.X,
+            (int)futurePosition.Y,
+            currentBox.Width,
+            currentBox.Height
+        );
+
+        futureBox.Inflate(12, 12);
+
+        Rectangle dashPathBox = GetDashPathBox(currentBox, futureBox);
+
+        if (IsDashPathBlocked(dashPathBox))
+        {
+            return -100000f;
+        }
+
+        Vector2 futureCenter = new Vector2(
+            futureBox.X + futureBox.Width / 2f,
+            futureBox.Y + futureBox.Height / 2f
+        );
+
+        float closestDangerDistance = GetClosestDangerDistance(futureCenter);
+
+        float score = Math.Min(closestDangerDistance, 500f);
+
+        // Usually objects come from the right side,
+        // so dashing right is more risky.
+        if (direction.X > 0.35f)
+        {
+            score -= 120f;
+        }
+
+        // Dashing left often buys time.
+        if (direction.X < -0.35f)
+        {
+            score += 25f;
+        }
+
+        // Vertical dash is often the best dodge in this game.
+        if (Math.Abs(direction.Y) > 0.65f)
+        {
+            score += 40f;
+        }
+
+        if (preferredDirection != Vector2.Zero)
+        {
+            Vector2 preferred = preferredDirection;
+            preferred.Normalize();
+
+            score += Vector2.Dot(direction, preferred) * 20f;
+        }
+
+        return score;
+    }
+
+    private Rectangle GetDashPathBox(Rectangle currentBox, Rectangle futureBox)
+    {
+        int left = Math.Min(currentBox.Left, futureBox.Left);
+        int top = Math.Min(currentBox.Top, futureBox.Top);
+        int right = Math.Max(currentBox.Right, futureBox.Right);
+        int bottom = Math.Max(currentBox.Bottom, futureBox.Bottom);
+
+        Rectangle pathBox = new Rectangle(
+            left,
+            top,
+            right - left,
+            bottom - top
+        );
+
+        pathBox.Inflate(16, 16);
+
+        return pathBox;
+    }
+
+    private bool IsDashPathBlocked(Rectangle pathBox)
+    {
+        foreach (Obstacle obstacle in _obstacles)
+        {
+            if (pathBox.Intersects(obstacle.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (Enemy enemy in _enemies)
+        {
+            if (pathBox.Intersects(enemy.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnemyBullet bullet in _enemyBullets)
+        {
+            if (pathBox.Intersects(bullet.GetSweptBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnergyShield shield in _shields)
+        {
+            if (pathBox.Intersects(shield.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        if (_boss != null && pathBox.Intersects(_boss.GetBounds()))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private float GetClosestDangerDistance(Vector2 point)
+    {
+        float closestDistance = 9999f;
+
+        foreach (Obstacle obstacle in _obstacles)
+        {
+            closestDistance = Math.Min(
+                closestDistance,
+                DistanceToRectCenter(point, obstacle.GetBounds())
+            );
+        }
+
+        foreach (Enemy enemy in _enemies)
+        {
+            closestDistance = Math.Min(
+                closestDistance,
+                DistanceToRectCenter(point, enemy.GetBounds())
+            );
+        }
+
+        foreach (EnemyBullet bullet in _enemyBullets)
+        {
+            closestDistance = Math.Min(
+                closestDistance,
+                DistanceToRectCenter(point, bullet.GetSweptBounds())
+            );
+        }
+
+        foreach (EnergyShield shield in _shields)
+        {
+            closestDistance = Math.Min(
+                closestDistance,
+                DistanceToRectCenter(point, shield.GetBounds())
+            );
+        }
+
+        if (_boss != null)
+        {
+            closestDistance = Math.Min(
+                closestDistance,
+                DistanceToRectCenter(point, _boss.GetBounds())
+            );
+        }
+
+        return closestDistance;
+    }
+
+    private static float DistanceToRectCenter(Vector2 point, Rectangle rect)
+    {
+        Vector2 rectCenter = new Vector2(
+            rect.X + rect.Width / 2f,
+            rect.Y + rect.Height / 2f
+        );
+
+        return Vector2.Distance(point, rectCenter);
+    }
+
+    private bool ShouldBotDash(BotDecision decision)
+    {
+        if (_dashCooldownTimer > 0f || _dashActiveTimer > 0f)
+        {
+            return false;
+        }
+
+        if (decision.MovementDirection == Vector2.Zero)
+        {
+            return false;
+        }
+
+        // BOT DASH CHANGE:
+        // If the bot is already protected by shield, avoid wasting dash too often.
+        if (_hasShield && _shieldTimer > 2f)
+        {
+            return false;
+        }
+
+        Rectangle droneBox = _drone.GetBounds();
+
+        Rectangle dangerZone = new Rectangle(
+            Math.Max(0, droneBox.X - 45),
+            Math.Max(GameSettings.PlayAreaTop, droneBox.Y - 90),
+            320,
+            droneBox.Height + 180
+        );
+
+        foreach (Obstacle obstacle in _obstacles)
+        {
+            if (dangerZone.Intersects(obstacle.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (Enemy enemy in _enemies)
+        {
+            if (dangerZone.Intersects(enemy.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnemyBullet bullet in _enemyBullets)
+        {
+            if (dangerZone.Intersects(bullet.GetSweptBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnergyShield shield in _shields)
+        {
+            if (dangerZone.Intersects(shield.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        if (_boss != null && dangerZone.Intersects(_boss.GetBounds()))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetBotShieldBuffDirection(out Vector2 direction)
+    {
+        direction = Vector2.Zero;
+
+        if (_buffs.Count == 0)
+        {
+            return false;
+        }
+
+        // If shield is already active for a while, don't waste movement chasing another one.
+        if (_hasShield && _shieldTimer > 5f)
+        {
+            return false;
+        }
+
+        Rectangle droneBox = _drone.GetBounds();
+
+        Vector2 droneCenter = new Vector2(
+            droneBox.X + droneBox.Width / 2f,
+            droneBox.Y + droneBox.Height / 2f
+        );
+
+        bool foundBuff = false;
+        Vector2 closestBuffCenter = Vector2.Zero;
+        float closestDistanceSquared = float.MaxValue;
+
+        foreach (BuffPickup buff in _buffs)
+        {
+            Rectangle buffBox = buff.GetBounds();
+
+            Vector2 buffCenter = new Vector2(
+                buffBox.X + buffBox.Width / 2f,
+                buffBox.Y + buffBox.Height / 2f
+            );
+
+            float distanceSquared = Vector2.DistanceSquared(
+                droneCenter,
+                buffCenter
+            );
+
+            if (distanceSquared < closestDistanceSquared)
+            {
+                closestDistanceSquared = distanceSquared;
+                closestBuffCenter = buffCenter;
+                foundBuff = true;
+            }
+        }
+
+        if (!foundBuff)
+        {
+            return false;
+        }
+
+        Vector2 moveDirection = closestBuffCenter - droneCenter;
+
+        if (moveDirection.LengthSquared() < 16f)
+        {
+            return false;
+        }
+
+        moveDirection.Normalize();
+
+        direction = moveDirection;
+        return true;
+    }
+
+    private bool IsBotInDanger()
+    {
+        Rectangle droneBox = _drone.GetBounds();
+
+        Rectangle dangerZone = new Rectangle(
+            Math.Max(0, droneBox.X - 60),
+            Math.Max(GameSettings.PlayAreaTop, droneBox.Y - 110),
+            380,
+            droneBox.Height + 220
+        );
+
+        foreach (Obstacle obstacle in _obstacles)
+        {
+            if (dangerZone.Intersects(obstacle.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (Enemy enemy in _enemies)
+        {
+            if (dangerZone.Intersects(enemy.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnemyBullet bullet in _enemyBullets)
+        {
+            if (dangerZone.Intersects(bullet.GetSweptBounds()))
+            {
+                return true;
+            }
+        }
+
+        foreach (EnergyShield shield in _shields)
+        {
+            if (dangerZone.Intersects(shield.GetBounds()))
+            {
+                return true;
+            }
+        }
+
+        if (_boss != null && dangerZone.Intersects(_boss.GetBounds()))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     // ML-2 CHANGE:
     // Chooses between human control and bot control.
     // Human mode uses keyboard.
@@ -1011,7 +1529,30 @@ public sealed class Game1 : Game
             _shots.Count
         );
 
-        _drone.Move(decision.MovementDirection, deltaTime);
+        Vector2 botDirection = decision.MovementDirection;
+
+        bool botInDanger = IsBotInDanger();
+
+        if (!botInDanger &&
+            TryGetBotShieldBuffDirection(out Vector2 shieldBuffDirection))
+        {
+            botDirection = shieldBuffDirection;
+        }
+
+        if (botDirection != Vector2.Zero)
+        {
+            _lastDashDirection = botDirection;
+            _lastDashDirection.Normalize();
+        }
+
+        if (botInDanger && ShouldBotDash(decision))
+        {
+            TryBotDash(decision);
+        }
+
+        _drone.Move(botDirection, deltaTime);
+
+        ApplyDash(deltaTime);
 
         _drone.ClampToScreen(
             GameSettings.ScreenWidth,
@@ -1403,7 +1944,10 @@ public sealed class Game1 : Game
                 {
                     _scoreManager.AddScore(1000);
                     _particles.EmitCrash(hitPosition);
+
                     _boss = null;
+                    _bossShotTimer = 0f;
+                    _bossTimeLeft = 0f;
                 }
             }
 
@@ -1737,8 +2281,6 @@ public sealed class Game1 : Game
             DrawHud();
         }
 
-        DrawBossIncomingWarning();
-
         if (_gameState.Current == GameStateType.Playing)
         {
             DrawShieldStatusCorner();
@@ -1814,6 +2356,11 @@ public sealed class Game1 : Game
 
         if (_gameState.Current == GameStateType.Fail)
         {
+            DrawRect(
+                new Rectangle(0, GameSettings.HudHeight, GameSettings.ScreenWidth, GameSettings.ScreenHeight - GameSettings.HudHeight),
+                new Color(0, 0, 0, 170)
+            );
+
             DrawGameOverPanel();
 
             PixelText.DrawCenteredText(
@@ -1821,7 +2368,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "GAME OVER",
                 GameSettings.ScreenWidth,
-                260,
+                185,
                 5,
                 Color.White
             );
@@ -1831,7 +2378,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 $"SCORE {_scoreManager.Score}",
                 GameSettings.ScreenWidth,
-                325,
+                255,
                 3,
                 new Color(255, 214, 10)
             );
@@ -1856,7 +2403,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 feedbackText,
                 GameSettings.ScreenWidth,
-                405,
+                310,
                 2,
                 _hasSavedMlFeedback
                     ? new Color(0, 217, 255)
@@ -1891,7 +2438,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 restartText,
                 GameSettings.ScreenWidth,
-                450,
+                355,
                 2,
                 Color.White
             );
@@ -1901,7 +2448,7 @@ public sealed class Game1 : Game
                 _pixel!,
                 "PRESS ENTER TO RESTART",
                 GameSettings.ScreenWidth,
-                490,
+                390,
                 3,
                 new Color(0, 217, 255)
             );
@@ -1941,47 +2488,6 @@ public sealed class Game1 : Game
                 new Color(0, 217, 255)
             );
         }
-    }
-
-    private void DrawGameOverPanel()
-    {
-        int panelWidth = 600;
-        int panelHeight = 245;
-
-        int panelX = GameSettings.ScreenWidth / 2 - panelWidth / 2;
-        int panelY = 375;
-
-        Rectangle panel = new Rectangle(
-            panelX,
-            panelY,
-            panelWidth,
-            panelHeight
-        );
-
-        DrawRect(
-            panel,
-            new Color(120, 30, 30, 215)
-        );
-
-        DrawRect(
-            new Rectangle(panel.X, panel.Y, panel.Width, 2),
-            new Color(180, 70, 70, 230)
-        );
-
-        DrawRect(
-            new Rectangle(panel.X, panel.Bottom - 2, panel.Width, 2),
-            new Color(180, 70, 70, 230)
-        );
-
-        DrawRect(
-            new Rectangle(panel.X, panel.Y, 2, panel.Height),
-            new Color(180, 70, 70, 230)
-        );
-
-        DrawRect(
-            new Rectangle(panel.Right - 2, panel.Y, 2, panel.Height),
-            new Color(180, 70, 70, 230)
-        );
     }
 
     private void DrawShieldExplosionAura()
@@ -2182,40 +2688,69 @@ public sealed class Game1 : Game
 
     private void DrawHud()
     {
-        // Solid HUD bar so stars do not show through.
-        DrawRect(
-            new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.HudHeight),
-            new Color(6, 10, 20, 255)
-        );
+        bool shouldShowBossHud =
+            _boss != null &&
+            _gameState.Current == GameStateType.Playing;
 
-        // Clean divider between HUD and play area.
-        DrawRect(
-            new Rectangle(0, GameSettings.HudHeight - 2, GameSettings.ScreenWidth, 2),
-            new Color(50, 80, 120, 255)
-        );
-
-        int panelWidth = 360;
+        int hudTop = 20;
         int panelHeight = 110;
-        int gap = 30;
+        int hudBottom = hudTop + panelHeight;
 
-        int totalWidth = panelWidth * 3 + gap * 2;
-        int startX = (GameSettings.ScreenWidth - totalWidth) / 2;
-        int panelY = 18;
-
-        Rectangle leftPanel = new Rectangle(startX, panelY, panelWidth, panelHeight);
-        Rectangle centerPanel = new Rectangle(startX + panelWidth + gap, panelY, panelWidth, panelHeight);
-        Rectangle rightPanel = new Rectangle(startX + (panelWidth + gap) * 2, panelY, panelWidth, panelHeight);
-
-        DrawPanel(leftPanel);
-        DrawPanel(centerPanel);
-        DrawPanel(rightPanel);
+        Rectangle leftPanel = new Rectangle(230, hudTop, 360, panelHeight);
+        Rectangle centerPanel = new Rectangle(620, hudTop, 360, panelHeight);
+        Rectangle rightPanel = new Rectangle(1010, hudTop, 360, panelHeight);
 
         DrawLeftHudPanel(leftPanel);
         DrawCenterHudPanel(centerPanel);
         DrawRightHudPanel(rightPanel);
 
-        int bossBarY = GameSettings.HudHeight + 35;
-        DrawBossHpBar(bossBarY);
+        DrawRect(
+            new Rectangle(0, hudBottom + 20, GameSettings.ScreenWidth, 2),
+            new Color(60, 120, 220)
+        );
+
+        DrawBossHpBar(hudBottom + 45);
+    }
+
+    private void DrawGameOverPanel()
+    {
+        int panelWidth = 620;
+        int panelHeight = 260;
+
+        int panelX = GameSettings.ScreenWidth / 2 - panelWidth / 2;
+        int panelY = 330;
+
+        Rectangle panel = new Rectangle(
+            panelX,
+            panelY,
+            panelWidth,
+            panelHeight
+        );
+
+        DrawRect(
+            panel,
+            new Color(120, 30, 30, 230)
+        );
+
+        DrawRect(
+            new Rectangle(panel.X, panel.Y, panel.Width, 2),
+            new Color(220, 80, 80, 255)
+        );
+
+        DrawRect(
+            new Rectangle(panel.X, panel.Bottom - 2, panel.Width, 2),
+            new Color(220, 80, 80, 255)
+        );
+
+        DrawRect(
+            new Rectangle(panel.X, panel.Y, 2, panel.Height),
+            new Color(220, 80, 80, 255)
+        );
+
+        DrawRect(
+            new Rectangle(panel.Right - 2, panel.Y, 2, panel.Height),
+            new Color(220, 80, 80, 255)
+        );
     }
 
     private void DrawPanel(Rectangle rect)
@@ -2827,31 +3362,6 @@ public sealed class Game1 : Game
         );
     }
 
-    private void DrawBossIncomingWarning()
-    {
-        if (_bossWarningTimer <= 0f ||
-            _gameState.Current != GameStateType.Playing)
-        {
-            return;
-        }
-
-        float pulse = 0.5f + 0.5f * MathF.Sin(_bossWarningTimer * 10f);
-
-        Color warningColor = pulse > 0.5f
-            ? new Color(255, 80, 220)
-            : new Color(255, 220, 250);
-
-        PixelText.DrawCenteredText(
-            _spriteBatch!,
-            _pixel!,
-            "BOSS INCOMING",
-            GameSettings.ScreenWidth,
-            GameSettings.HudHeight + 85,
-            3,
-            warningColor
-        );
-    }
-
     private void DrawBossHpBar(int y)
     {
         if (_boss == null || _gameState.Current != GameStateType.Playing)
@@ -2872,7 +3382,7 @@ public sealed class Game1 : Game
         PixelText.DrawText(
             _spriteBatch!,
             _pixel!,
-            $"BOSS HP {_boss.Health}/{_boss.MaxHealth}",
+            $"BOSS HP {_boss.Health}/{_boss.MaxHealth}   TIME {(int)Math.Ceiling(_bossTimeLeft)}s",
             new Vector2(x, y - 18),
             1,
             new Color(255, 120, 220)
